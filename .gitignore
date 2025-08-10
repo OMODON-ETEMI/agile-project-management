@@ -1,0 +1,16 @@
+node_modules
+/frontend
+/Backend/node
+/Authentication
+/.vscode
+
+# Ignore all env files anywhere
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
