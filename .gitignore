@@ -1,6 +1,6 @@
 node_modules
 /frontend
-/Backend/node
+/Backend/node/update.js
 /Authentication
 /.vscode
 
