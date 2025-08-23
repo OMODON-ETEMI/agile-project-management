@@ -89,6 +89,48 @@ class User_Workspace:
         user_data = [{**json.loads(json_util.dumps(users)), "_id" : str(users['_id'])} for users in users]
         return Response(json.dumps(user_data), mimetype='application,json'), 200
     
+    
+class User_Organisation: 
+    def __init__(self, user_id, organisation_id, role, joined_at):
+        self.user_id = ObjectId(user_id)
+        self.organisation_id = ObjectId(organisation_id)
+        self.role = role
+        self.joined_at = joined_at
+
+
+    def create_User_Organisation(self, session=None):
+        organisation = db.organisation.find_one({"_id": self.organisation_id})
+        if not organisation:
+            return Response(json.dumps({'message' : f"Workspace with ID {self.organisation_id} not found."}), mimetype='application,json',status=404)
+        result = db.User_Organisation.insert_one({
+            'user_id' : self.user_id,
+            'organisation_id': self.organisation_id,
+            'role' : self.role,
+            'joined_at': self.joined_at
+        }, session=session)
+
+        new_User_Organisation = db.User_Organisation.find_one({'_id' : result.inserted_id})
+        if new_User_Organisation:
+            return Response(json.dumps({'message' : 'User has been addeed to this Organisation'}), mimetype='application,json'), 201
+        else :
+            return Response(json.dumps({'message' : 'failed to add user to this Organisation'}), mimetype='application,json'), 500
+
+
+    def revoke_User_Organisation(self):
+        result = db.User_Organisation.find_one_and_delete({'organisation_id': self.organisation_id, 'user_id': self.user_id})
+        if result:
+            return Response(json.dumps({'message' : 'User has been removed from this Organisation'}), mimetype='application,json'), 200
+        else :
+            return Response(json.dumps({'message' : 'failed to remove user from this Organisation'}), mimetype='application,json'), 500
+        
+
+
+    def Users_in_Organisation(Organisation_id):
+        user_ids = [user['user_id'] for user in db.User_Organisation.find({'organisation_id': ObjectId(Organisation_id)}, {'user_id': 1, '_id': 0  })]
+        users = db.Users.find({'_id': {'$in' : user_ids}})
+        user_data = [{**json.loads(json_util.dumps(users)), "_id" : str(users['_id'])} for users in users]
+        return Response(json.dumps(user_data), mimetype='application,json'), 200
+    
 class User_Activity:
         def __init__(self, user_id, action, entity_type, entity_id, timestamp=None, metadata=None, workspace_id=None, organisation_id=None, actor_type=None):
             self.user_id = ObjectId(user_id)

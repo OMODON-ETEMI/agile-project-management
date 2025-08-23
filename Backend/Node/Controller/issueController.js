@@ -28,6 +28,12 @@ async function searchIssues(queryParams) {
     if (Object.keys(queryParams).includes('workspace_id')) {
       mongoQuery.workspace_id = new mongoose.Types.ObjectId(queryParams.workspace_id);
     }
+    if (Object.keys(queryParams).includes('board_id')) {
+      mongoQuery.board_id = new mongoose.Types.ObjectId(queryParams.board_id);
+    }
+    if (Object.keys(queryParams).includes('creator')) {
+      mongoQuery.creator = new mongoose.Types.ObjectId(queryParams.creator);
+    }
 
     if (queryParams.title) {
       mongoQuery.title = { $regex: queryParams.title, $options: 'i' };
@@ -35,7 +41,7 @@ async function searchIssues(queryParams) {
 
     // Add other query parameters to mongoQuery as needed
     for (const key in queryParams) {
-      if (!['workspace_id', 'title'].includes(key)){
+      if (!['workspace_id', 'title', 'board_id', 'creator'].includes(key)){
         mongoQuery[key] = queryParams[key];
       }
     }

@@ -10,7 +10,7 @@ from package.models.user import User
 from package.models.board import Board
 from package.models.organisation import Organisation
 from package.models.workspace import Workspace
-from package.models.user_relationships import User_Workspace, User_Activity
+from package.models.user_relationships import User_Workspace, User_Activity, User_Organisation
 from package.config.utility import get_ip_address, auth_reqired
 from package.config.import_issue import import_issue
 from package.middleware import check_list
@@ -235,6 +235,19 @@ def search():
         }), 404
 
 
+@app.route('/User/me', methods=['POST'])
+@auth_reqired
+def UserData():
+    user_id = g.user_id
+    response = User.User_Data(user_id)
+
+    if response:
+        return jsonify(response), 200
+    else :
+         return jsonify({
+            'Error' : 'User not found'
+        }), 404
+         
 @app.route('/login', methods=['POST'])
 @limiter.limit("30 per minute")
 def login():
@@ -279,7 +292,7 @@ def refresh():
 # ------------------------- BOARD ---------------------------- #
     
 @app.route('/add/board', methods=['POST'])
-# @auth_reqired
+@auth_reqired
 @limiter.limit("30 per minute")
 def create_board(): 
     data = request.json
@@ -370,7 +383,7 @@ def delete_board():
 
 # ----------------------------- Organisation ------------------------- #
 @app.route('/add/organisation', methods=['POST'])
-@auth_reqired
+# @auth_reqired
 def create_organisation(): 
     data = request.json
     if not data:
@@ -379,12 +392,22 @@ def create_organisation():
     image = data.get('image')
     description = data.get('description')
     created_By = data.get('user_id')
+    slug = data.get('slug') or Organisation.generate_Unique_slug(title)
     createdAt = datetime.now(timezone.utc)
+    role = data.get('role') or 'Admin'
     updatedAt = createdAt
     info = [title, createdAt, created_By]
-    if check_list(info): 
-        organisation = Organisation(title, createdAt, updatedAt, image, description, created_By)
+    if check_list(info):
+        organisation = Organisation(title, createdAt, updatedAt, image, description, created_By, slug)
         response = organisation.create_organisation()
+        organisation = response.get_json()
+        user_organisation = User_Organisation( user_id= created_By, organisation_id=organisation['organisation']['_id']['$oid'], role = role ,  joined_at= createdAt) 
+        user_organisation_response = user_organisation.create_User_Organisation()
+        if user_organisation_response[1] != 201:
+            Organisation.delete(organisation_id=organisation['organisation']['_id']['$oid'], user_id=created_By)
+            return jsonify({
+                'message': "Organisation created, but failed to add creator as a member."
+            }), 500
         return response
     else :
         return jsonify({
@@ -479,6 +502,7 @@ def create_worskapce():
     image = data.get('image')
     description = data.get('description')
     created_By = data.get('user_id')
+    role = data.get('role')
     createdAt = datetime.now(timezone.utc)
     organisation_id = data.get('organisation_id')
     info = [title, createdAt, organisation_id, created_By]
@@ -492,8 +516,7 @@ def create_worskapce():
         return workspace_response
     response_data = workspace_response.get_json()
     workspace_id = response_data['Workspace']['_id']['$oid']
-    role = 'Admin'
-    if not check_list([workspace_id, role, created_By, createdAt]):
+    if not check_list([workspace_id, role, created_By, createdAt, role]):
         return jsonify({
             'Error':'Please enter the required fields'
         }), 400
@@ -692,6 +715,11 @@ def backfill_ID():
 
 # -------------------------------------------------------------------------- #
 @app.errorhandler(Exception)
+def handle_exception(e):
+    return jsonify({
+        "error": str(e),
+        "type": type(e).__name__
+    }), 500
 def Handle_bson_error(error):
     if isinstance(error, (BSONError, InvalidBSON, InvalidDocument, InvalidId, InvalidStringData)):
         message = {

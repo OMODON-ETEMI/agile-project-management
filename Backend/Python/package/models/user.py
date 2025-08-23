@@ -132,6 +132,60 @@ class User:
             'exp': int((datetime.now(timezone.utc) + SecurityConfig.JWT_REFRESH_TOKEN_EXPIRES).timestamp()),
             'iat': int(datetime.now(timezone.utc).timestamp()),
         }, SecurityConfig.JWT_REFRESH_SECRET_KEY, ALGORITHM)
+        
+    @staticmethod
+    def User_Data(user_id):
+        """Fetch user data by ID"""
+        pipline = [
+            {
+                '$match' : {'_id': ObjectId(user_id)}
+            },
+            {
+                '$lookup': {
+                    'from': 'User_Organisation',
+                    'localField': '_id',
+                    'foreignField': 'user_id',
+                    'as': 'user_Orgs'
+                }
+            }, 
+            {
+                '$unwind': '$user_Orgs'
+            },
+            {
+                '$lookup': {
+                    'from' : 'organisation',
+                    'let' : {'org_id': '$user_Orgs.organisation_id'},
+                    'pipeline': [
+                        {
+                            '$match': {
+                                '$expr': {
+                                    '$eq': ['$_id', '$$org_id']
+                                }
+                            }
+                        },
+                    ],
+                    'as': 'organisation'
+                }
+            },
+            {
+                '$unwind': '$organisation'
+            },
+            {
+                '$addFields': {
+                    'organisation.role': '$user_Orgs.role',
+                }
+            },
+            {
+                '$project': {
+                    'user_Orgs': 0,
+                }
+            }
+        ]
+        User_data = list(db.Users.aggregate(pipline))
+        print('User Data:', User_data)
+        if not User_data:
+            return "User not found", 404
+        return User_data
 
     @staticmethod
     def login(username, password, ip_address):
@@ -148,14 +202,22 @@ class User:
             AuthManager.clear_failed_attempts(username)
 
             #Generating tokens
-            user_data = json.loads(json_util.dumps(user))
-            access_token = User.create_access_token(user_data)
-            refresh_token = User.create_refresh_token(user_data)
+            try:
+                user_data = json.loads(json_util.dumps(user))
+                Data = json.loads(json_util.dumps(User.User_Data(user_data['_id']['$oid'])))
+                print('Data:', Data)
+                access_token = User.create_access_token(user_data)
+                refresh_token = User.create_refresh_token(user_data)
+                
+            except Exception as e:
+                return jsonify({'Message': 'Failed to generate tokens',
+                                'Error': (e)}), 500
 
             response = jsonify({
-                'response': "Login successful",
-                'token': access_token,
-            })
+                            'response': "Login successful",
+                            'data': Data,
+                            'token': access_token,
+                        })
 
             #set cookie
             response.set_cookie('refresh_token',

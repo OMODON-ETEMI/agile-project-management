@@ -173,7 +173,7 @@ class Organisation:
         result = db.organisation.delete_one({'_id': ObjectId(organisation_id), 'created_By' : ObjectId(user_id)})
         if result.deleted_count == 1 :
             message = {'message' : f'Deleted Successfully' }
-            projectcollection = db.get_collection('proojects')
+            projectcollection = db.get_collection('projects')
             taskcollection = db.get_collection('tasks')
             projectcollection.delete_many({'assigned_organisation': ObjectId(organisation_id)})
             taskcollection.delete_many({'assigned_organisation': ObjectId(organisation_id)})
