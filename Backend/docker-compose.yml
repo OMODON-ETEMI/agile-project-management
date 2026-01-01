@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  python-services:
+    build:
+      context: ./Python
+      dockerfile: Dockerfile.dev
+    container_name: python-services
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./Python:/app
+    depends_on:
+      - redis
+    environment:
+       REDIS_HOST: redis
+       REDIS_PORT: 6379
+
+  node-services:
+    build:
+      context: ./Node
+      dockerfile: Dockerfile.dev
+    container_name: node-services
+    ports:
+        - "4000:4000"
+    volumes:
+        - ./Node:/app
+        - /app/node_modules 
+    depends_on:
+        - redis
+    environment:
+       REDIS_HOST: redis
+       REDIS_PORT: 6379
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - "6379:6379"

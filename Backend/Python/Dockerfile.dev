@@ -1,0 +1,28 @@
+# python-service/Dockerfile.dev
+FROM python:3.12-slim
+
+# Create app directory
+WORKDIR /app
+
+# Install OS deps that pip packages might need (gcc, build-essential optional)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only requirements first for caching
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+#copy the rest of the app into the container
+COPY . .
+
+# Expose port the app uses
+EXPOSE 5000
+
+# Set environment variables (FLASK will read these)
+ENV FLASK_APP=run.py
+ENV FLASK_ENV=development
+ENV PYTHONUNBUFFERED=1
+
+# Start the dev server
+CMD ["python", "run.py"]

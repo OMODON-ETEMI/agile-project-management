@@ -1,0 +1,20 @@
+# Node-service/Dockerfile.dev
+FROM node:20-slim
+
+# Create app directory
+WORKDIR /app
+
+# Install app dependencies
+COPY package*.json ./
+
+#install dependencies
+RUN npm install
+
+#copy the rest of the app into the container
+COPY . .
+
+#Expose the port the app runs on
+EXPOSE 4000
+
+#Start the dev server
+CMD ["npm", "run", "dev"]
