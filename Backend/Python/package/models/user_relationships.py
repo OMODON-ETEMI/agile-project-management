@@ -2,6 +2,7 @@ from flask import Response,jsonify
 import json
 from bson import json_util, ObjectId
 from package import db
+from package.config.utility import serialize_document
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import os
@@ -55,10 +56,10 @@ class User_Workspace:
     def create_User_Workspace(self):
         workspace = db.Workspace.find_one({"_id": self.workspace_id})
         if not workspace:
-            return Response(json.dumps({'message' : f"Workspace with ID {self.workspace_id} not found."}), mimetype='application,json',status=404)
+            return Response(json.dumps({'message' : f"Workspace with ID {self.workspace_id} not found."}), mimetype='application/json',status=404)
         organisation_id = workspace['organisation_id']
         if not organisation_id:
-            return Response(json.dumps({'message' : "Missing 'organisation_id' in workspace data."}), mimetype='application,json',status=404)
+            return Response(json.dumps({'message' : "Missing 'organisation_id' in workspace data."}), mimetype='application/json',status=404)
         result = db.User_Workspace.insert_one({
             'user_id' : self.user_id,
             'workspace_id' : self.workspace_id,
@@ -67,19 +68,18 @@ class User_Workspace:
             'joined_at': self.joined_at
         })
 
-        new_User_Workspace = db.User_Workspace.find_one({'_id' : result.inserted_id})
-        if new_User_Workspace:
-            return Response(json.dumps({'message' : 'User has been addeed to this Workspace'}), mimetype='application,json'), 201
+        if result.acknowledged:
+            return Response(json.dumps({'message': 'User invited to workspace successfully'}), mimetype='application/json'), 201
         else :
-            return Response(json.dumps({'message' : 'failed to add user to this Workspace'}), mimetype='application,json'), 500
+            return Response(json.dumps({'message' : 'failed to invite User'}), mimetype='application,json'), 500
 
 
     def revoke_User_Workspace(self):
         result = db.User_Workspace.find_one_and_delete({'workspace_id': self.workspace_id, 'user_id': self.user_id})
         if result:
-            return Response(json.dumps({'message' : 'User has been removed from this Workspace'}), mimetype='application,json'), 200
+            return Response(json.dumps({'message' : 'User has been removed from this Workspace'}), mimetype='application/json'), 200
         else :
-            return Response(json.dumps({'message' : 'failed to remove user from this Workspace'}), mimetype='application,json'), 500
+            return Response(json.dumps({'message' : 'failed to remove user from this Workspace'}), mimetype='application/json'), 500
         
 
 
@@ -91,46 +91,210 @@ class User_Workspace:
     
     
 class User_Organisation: 
-    def __init__(self, user_id, organisation_id, role, joined_at):
+    def __init__(self, user_id, organisation_id, joined_at):
         self.user_id = ObjectId(user_id)
         self.organisation_id = ObjectId(organisation_id)
-        self.role = role
         self.joined_at = joined_at
 
 
-    def create_User_Organisation(self, session=None):
-        organisation = db.organisation.find_one({"_id": self.organisation_id})
+    def create_User_Organisation(user_id, organisation_id, joined_at, session=None):
+        organisation = db.organisation.find_one({"_id": ObjectId(organisation_id)})
         if not organisation:
-            return Response(json.dumps({'message' : f"Workspace with ID {self.organisation_id} not found."}), mimetype='application,json',status=404)
-        result = db.User_Organisation.insert_one({
-            'user_id' : self.user_id,
-            'organisation_id': self.organisation_id,
-            'role' : self.role,
-            'joined_at': self.joined_at
-        }, session=session)
+            return {
+                "success": False,
+                "error": f"Organisation not found."
+            }
 
-        new_User_Organisation = db.User_Organisation.find_one({'_id' : result.inserted_id})
-        if new_User_Organisation:
-            return Response(json.dumps({'message' : 'User has been addeed to this Organisation'}), mimetype='application,json'), 201
-        else :
-            return Response(json.dumps({'message' : 'failed to add user to this Organisation'}), mimetype='application,json'), 500
+        result = db.User_Organisation.insert_one(
+            {
+                'user_id': ObjectId(user_id),
+                'organisation_id': ObjectId(organisation_id),
+                'joined_at': joined_at
+            },
+            session=session
+        )
+
+        if result.inserted_id:
+            return {"success": True}
+        
+        return {
+            "success": False,
+            "error": "Failed to add user to this Organisation"
+        }
 
 
-    def revoke_User_Organisation(self):
-        result = db.User_Organisation.find_one_and_delete({'organisation_id': self.organisation_id, 'user_id': self.user_id})
+
+    def revoke_User_Organisation(organisation_id, user_id):
+        result = db.User_Organisation.find_one_and_delete({'organisation_id': ObjectId(organisation_id), 'user_id':ObjectId(user_id)})
         if result:
-            return Response(json.dumps({'message' : 'User has been removed from this Organisation'}), mimetype='application,json'), 200
+            return {"success": True}
         else :
-            return Response(json.dumps({'message' : 'failed to remove user from this Organisation'}), mimetype='application,json'), 500
+            return {"success": False, 
+                    "error": "Failed to remove user from this Organisation"}
         
 
 
     def Users_in_Organisation(Organisation_id):
-        user_ids = [user['user_id'] for user in db.User_Organisation.find({'organisation_id': ObjectId(Organisation_id)}, {'user_id': 1, '_id': 0  })]
-        users = db.Users.find({'_id': {'$in' : user_ids}})
-        user_data = [{**json.loads(json_util.dumps(users)), "_id" : str(users['_id'])} for users in users]
-        return Response(json.dumps(user_data), mimetype='application,json'), 200
+        users = db.User_Organisation.aggregate([
+            {
+                '$match' : {'organisation_id':ObjectId( Organisation_id)}},
+            {
+                "$lookup": {
+                    'from': 'Users',
+                    'localField': 'user_id',
+                    'foreignField': '_id',
+                    'as': 'user_details'
+                }}, 
+            { 
+                "$lookup": {
+                    'from': 'user_permissions',
+                    'let': {'uId': '$user_id', 'orgId': '$organisation_id'},
+                    'pipeline': [
+                        {
+                            '$match': {
+                                '$expr': {
+                                    '$eq': ['$$uId', '$userId']
+                                }
+                            }
+                        },
+                        {
+                            '$unwind': '$organizations'
+                        },
+                        {
+                            '$match': {
+                                '$expr': {
+                                    '$eq': ['$$orgId', '$organizations.organizationId']
+                                }
+                            }
+                        },
+                        {
+                            '$project': {
+                                'role': '$organizations.role',
+                                '_id': 0
+                            }
+                        }
+                    ],
+                    'as': 'role'
+                }},
+            { "$addFields": {
+                    "role": { "$arrayElemAt": ["$role.role", 0] }
+                }},
+            {
+                '$project': {
+                    '_id': 0,
+                    'user_id': 1,
+                    'role': 1,
+                    'firstname': {'$arrayElemAt': [ '$user_details.firstname', 0 ]},
+                    'lastname': {'$arrayElemAt': [ '$user_details.lastname', 0 ]},
+                    'email': {'$arrayElemAt': [ '$user_details.email', 0 ]},
+                    'username': {'$arrayElemAt': [ '$user_details.username', 0 ]},
+                    'image': {'$arrayElemAt': [ '$user_details.image', 0 ]}
+                }}
+        ])
+        if users:
+            user_data = [{**json.loads(json_util.dumps(user)), "user_id" : str(user['user_id'])} for user in users]
+            total = len(user_data)
+            return {
+                "total": total,
+                "results": user_data
+            }
     
+    
+    def Search_Users_in_Organisation(organisation_id, query=None, page=1, limit=10, user_id=None):
+
+        match_conditions = []
+
+        if query and query.strip():
+            search_regex = {'$regex': query.strip(), '$options': 'i'}
+            match_conditions.extend([
+                {'username': search_regex},
+                {'email': search_regex}
+            ])
+
+
+        if user_id:
+            try:
+                match_conditions.append({'_id': ObjectId(user_id)})
+            except Exception:
+                return {"total": 0, "results": []}
+            
+        # CRITICAL: If no conditions, return empty early
+        if not match_conditions:
+            return {"total": 0, "results": []}
+
+       # Now safely build $or only if >1 condition, otherwise use single condition
+        if len(match_conditions) > 1:
+            match_stage = {'$match': {'$or': match_conditions}}
+        else:
+            match_stage = {'$match': match_conditions[0]}
+
+        pipeline = [
+            match_stage,
+            {
+                '$lookup': {
+                    'from': 'User_Organisation',
+                    'let': {'userId': '$_id'},
+                    'pipeline': [
+                        {
+                            '$match': {
+                                '$expr': {
+                                    '$and': [
+                                        {'$eq': ['$user_id', '$$userId']},
+                                        {'$eq': ['$organisation_id', ObjectId(organisation_id)]}
+                                    ]
+                                }
+                            }
+                        }
+                    ],
+                    'as': 'memberships'
+                }
+            },
+            {
+                "$lookup": {
+                    'from': 'user_permissions',
+                    'let': {'uId': '$_id', 'orgId': ObjectId(organisation_id)},
+                    'pipeline': [
+                        {'$match': {'$expr': {'$eq': ['$$uId', '$userId']}}},
+                        {'$unwind': '$organizations'},
+                        {'$match': {'$expr': {'$eq': ['$$orgId', '$organizations.organizationId']}}},
+                        {'$project': {'role': '$organizations.role', '_id': 0}}
+                    ],
+                    'as': 'role'
+                }
+            },
+            {
+                "$addFields": {
+                    "user_id": "$_id",
+                    "isMember": {"$gt": [{"$size": "$memberships"}, 0]},
+                    "role": {"$arrayElemAt": ["$role.role", 0]}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "password": 0,
+                    "memberships": 0,
+                    "createdAt": 0,
+                    "updatedAt": 0
+                }
+            }
+        ]
+
+        try:
+                users = list(db.Users.aggregate(pipeline))
+        except Exception as e:
+                print("Aggregation error:", e)
+                return {"total": 0, "results": []}
+            
+        results = [{**u, "user_id": str(u["user_id"])} for u in users]
+        return {
+            "total": len(results),
+            "page": page,
+            "limit": limit,
+            "results": results
+        }
+
+        
 class User_Activity:
         def __init__(self, user_id, action, entity_type, entity_id, timestamp=None, metadata=None, workspace_id=None, organisation_id=None, actor_type=None):
             self.user_id = ObjectId(user_id)
@@ -229,26 +393,23 @@ class User_Activity:
             return list(self.collection.aggregate(pipeline))
 
         def get_last_accessed_entities(user_id, entity_type, limit):
-            print("user_id:", user_id, "entity_type:", entity_type, "limit:", limit)
             """Fetches the last accessed entities by the user."""
             pipeline = [
                 {"$match": {"user_id": ObjectId(user_id), "entity_type": entity_type}},
                 {"$sort": {"timestamp": -1}},
                 {"$group": {  
-                    "_id": "$entity_id",  # Correct way to group by entity_id
+                    "_id": "$entity_id",
+                    "timestamp": {"$first" : "$timestamp"}
                 }},
                 {"$project": {
-                    "entity_id": "$_id",
-                    "timestamp": 1,
+                    "title": "$_id",
+                    "timestamp": "$timestamp",
                     "_id": 0
                 }},
                 {"$limit": limit},
             ]
             data = list(db.User_Activity.aggregate(pipeline))
-            slug = [item['entity_id'] for item in data if 'entity_id' in item]
-            print("slug:", slug)
-            result = list(db[entity_type].find({"slug": {"$in" : slug}}))
-            return json.loads(json_util.dumps(result))
+            return serialize_document(data)
 
         def clear_old_logs(self, days = 7):
             """Deletes logs older than the specified number of days."""

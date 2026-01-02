@@ -50,7 +50,13 @@ class User:
                     'response': f'Your Account has been created, {new_user["firstname"]}',
                     'token': access_token
                 }))
-            response.set_cookie('http_only_token', refresh_token, httponly=True, secure=True, samesite='Strict')
+            response.set_cookie('refresh_token',
+                                 refresh_token, 
+                                 httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY ,
+                                 secure= SecurityConfig.SESSION_COOKIE_SECURE, 
+                                 samesite= SecurityConfig.SESSION_COOKIE_SAMESITE, 
+                                 max_age=60 * 60 * 24 * 7,  # 7 days
+                                 path= '/', )
             response.status_code = 200
             return response
         else:
@@ -182,7 +188,6 @@ class User:
             }
         ]
         User_data = list(db.Users.aggregate(pipline))
-        print('User Data:', User_data)
         if not User_data:
             return "User not found", 404
         return User_data
@@ -191,7 +196,10 @@ class User:
     def login(username, password, ip_address):
             #check for brute force attempts
         if AuthManager.check_brute_force(username, ip_address):
-            return jsonify({'Error': 'Too many failed attempts.'}), 429 
+            response = make_response(jsonify({'Error': 'Too many failed attempts. Try again later.'}))
+            response.delete_cookie('refresh_token', path='/')
+            response.status_code = 429
+            return response
         try:
             user = db.Users.find_one({'username': username})
             if not user or not check_password(password, user['password']):
@@ -205,13 +213,13 @@ class User:
             try:
                 user_data = json.loads(json_util.dumps(user))
                 Data = json.loads(json_util.dumps(User.User_Data(user_data['_id']['$oid'])))
-                print('Data:', Data)
                 access_token = User.create_access_token(user_data)
                 refresh_token = User.create_refresh_token(user_data)
                 
             except Exception as e:
+                print('Token Generation Error:', str(e))
                 return jsonify({'Message': 'Failed to generate tokens',
-                                'Error': (e)}), 500
+                                'Error': str(e)}), 500
 
             response = jsonify({
                             'response': "Login successful",
@@ -227,18 +235,11 @@ class User:
                                  samesite= SecurityConfig.SESSION_COOKIE_SAMESITE, 
                                  max_age=60 * 60 * 24 * 7,  # 7 days
                                  path= '/', )
-            response.set_cookie('access_token',
-                                 access_token, 
-                                 httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY ,
-                                 secure= SecurityConfig.SESSION_COOKIE_SECURE, 
-                                 samesite= SecurityConfig.SESSION_COOKIE_SAMESITE, 
-                                 max_age= 60 * 30,  # 30 minutes
-                                 path= '/', )
             response.status_code = 200
             return response
         except Exception as e:
             current_app.logger.error(f"Login error: {str(e)}")
-            return jsonify({'Error': 'An error occurred during login'}),
+            return jsonify({'Error': 'An error occurred during login'}), 500
             
 
     @staticmethod
@@ -249,39 +250,35 @@ class User:
             payload = jwt.decode(refresh_token, SecurityConfig.JWT_REFRESH_SECRET_KEY, ALGORITHM)
 
             if payload['token_type'] != 'refresh':
-                return jsonify({'Error': 'Invalid token type'}), 401
+                response = make_response(jsonify({'Error': 'Token type invalid'}))
+                response.delete_cookie('refresh_token', path='/')
+                response.status_code = 401
+                return response
 
             # Check if the token is already blacklisted
             if AuthManager.BlockedToken.is_blocked(refresh_token):
-                return jsonify({'Error': 'Token has already been invalidated'}), 401
+                response = make_response(jsonify({'Error': 'Token already revoked'}))
+                response.delete_cookie('refresh_token', path='/')
+                response.status_code = 401
+                return response
 
             # Blacklist the refresh token
             AuthManager.block_token(refresh_token)
-
-            # Clear the cookie
-            response = jsonify({'response': 'Successfully logged out'})
-            response.set_cookie('refresh_token',
-                                 '',
-                                httponly=True,
-                                secure=SecurityConfig.SESSION_COOKIE_SECURE, 
-                                samesite=SecurityConfig.SESSION_COOKIE_SAMESITE, 
-                                expires=0, 
-                                path='/'
-                                )
-            response.set_cookie('access_token',
-                                 '',
-                                httponly=True,
-                                secure=SecurityConfig.SESSION_COOKIE_SECURE, 
-                                samesite=SecurityConfig.SESSION_COOKIE_SAMESITE, 
-                                expires=0, 
-                                path='/'
-                                )
-            response.status_code = 200
+            response = make_response(jsonify({'response': 'Successfully logged out'}))
+            response.delete_cookie('refresh_token', path='/')
+            response.status_code = 401
             return response
         except jwt.ExpiredSignatureError:
-            return jsonify({'Error': 'Token has already expired'}), 401
+            response = make_response(jsonify({'Error': 'Token expired'}))
+            response.delete_cookie('refresh_token', path='/')
+            response.status_code = 401
+            return response
+            
         except jwt.InvalidTokenError:
-            return jsonify({'Error': 'Invalid token'}), 401
+            response = make_response(jsonify({'Error': 'Token invalid'}))
+            response.delete_cookie('refresh_token', path='/')
+            response.status_code = 401
+            return response
         except Exception as e:
             current_app.logger.error(f"Logout error: {str(e)}")
             return jsonify({'Error': 'An error occurred during logout'}), 500
@@ -291,29 +288,18 @@ class User:
     def refresh(token):
         payload = jwt.decode(token, current_app.config['JWT_REFRESH_SECRET_KEY'], ALGORITHM)
         if payload['token_type'] != 'refresh':
-            return jsonify({'Error' : 'Invalid token data'}), 401
+            response = make_response(jsonify({'Error': 'Token type invalid'}))
+            response.delete_cookie('refresh_token', path='/')
+            response.status_code = 401
+            return response
         try:
             #check if token is blacklisted
             if AuthManager.BlockedToken.is_blocked(token):
-                response = make_response(jsonify({'Error': 'Token has been blacklisted'}))
-                response.set_cookie('refresh_token',
-                                     'Hello',
-                                    httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY,
-                                    secure=SecurityConfig.SESSION_COOKIE_SECURE, 
-                                    samesite=SecurityConfig.SESSION_COOKIE_SAMESITE, 
-                                    expires=0, 
-                                    path='/'
-                                    )
-                response.set_cookie('access_token',
-                                     '',
-                                    httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY,
-                                    secure=SecurityConfig.SESSION_COOKIE_SECURE,
-                                    samesite=SecurityConfig.SESSION_COOKIE_SAMESITE,
-                                    expires=0,
-                                    path='/'
-                                    )
+                response = make_response(jsonify({'error': 'Token revoked'}))
+                response.set_cookie('refresh_token', path='/')
                 response.status_code = 401
                 return response
+
             user = db.Users.find_one({"_id": ObjectId(payload['user_id'])})
             if not user:
                 return jsonify({'Error': 'User not found'}), 404
@@ -324,6 +310,7 @@ class User:
             user_data = json.loads(json_util.dumps(user))
             access_token = User.create_access_token(user_data)
             refresh_token = User.create_refresh_token(user_data)
+            print('Generated new tokens during refresh: ', refresh_token, access_token)
             response = make_response(jsonify({'token': access_token}))
             response.set_cookie('refresh_token',
                                  refresh_token, 
@@ -332,55 +319,58 @@ class User:
                                  samesite= SecurityConfig.SESSION_COOKIE_SAMESITE, 
                                  max_age=604800, 
                                  path= '/',)
-            response.set_cookie('access_token',
-                                 access_token, 
-                                 httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY ,
-                                 secure= SecurityConfig.SESSION_COOKIE_SECURE, 
-                                 samesite= SecurityConfig.SESSION_COOKIE_SAMESITE, 
-                                 max_age=1000, 
-                                 path= '/', )
             response.status_code = 200
             return response
         except jwt.ExpiredSignatureError:
-            response = make_response(jsonify({'Error': 'Token has expired'}))
-            response.set_cookie('refresh_token',
-                                 '',
-                                httponly=True,
-                                secure=SecurityConfig.SESSION_COOKIE_SECURE, 
-                                samesite=SecurityConfig.SESSION_COOKIE_SAMESITE, 
-                                expires=0, 
-                                path='/'
-                                )
-            response.set_cookie('access_token',
-                                 '',
-                                httponly=True,
-                                secure=SecurityConfig.SESSION_COOKIE_SECURE,
-                                samesite=SecurityConfig.SESSION_COOKIE_SAMESITE,
-                                expires=0,
-                                path='/'
-                                )
+            print('Token expired during refresh')
+            response = make_response(jsonify({'error': 'Token expired'}))
+            response.delete_cookie('refresh_token', path='/')
             response.status_code = 401
             return response
         except jwt.InvalidTokenError:
+            print('Invalid token during refresh')
             response = make_response(jsonify({'Error': 'Invalid token'}))
-            response.set_cookie('refresh_token',
-                                 '',
-                                httponly=True,
-                                secure=SecurityConfig.SESSION_COOKIE_SECURE, 
-                                samesite=SecurityConfig.SESSION_COOKIE_SAMESITE, 
-                                expires=0, 
-                                path='/'
-                                )
-            response.set_cookie('access_token',
-                                 '',
-                                httponly=True,
-                                secure=SecurityConfig.SESSION_COOKIE_SECURE,
-                                samesite=SecurityConfig.SESSION_COOKIE_SAMESITE,
-                                expires=0,
-                                path='/'
-                                )
+            response.delete_cookie('refresh_token', path='/')
             response.status_code = 401
             return response
+        
+    @staticmethod
+    def server_Refresh(token):
+        payload = jwt.decode(token, current_app.config['JWT_REFRESH_SECRET_KEY'], ALGORITHM)
+        if payload['token_type'] != 'refresh':
+            response = make_response(jsonify({'Error': 'Token type invalid'}))
+            response.delete_cookie('refresh_token', path='/')
+            response.status_code = 401
+            return response
+        try:
+            #check if token is blacklisted
+            if AuthManager.BlockedToken.is_blocked(token):
+                response = make_response(jsonify({'error': 'Token revoked'}))
+                response.set_cookie('refresh_token', path='/')
+                response.status_code = 401
+                return response
 
+            user = db.Users.find_one({"_id": ObjectId(payload['user_id'])})
+            if not user:
+                return jsonify({'Error': 'User not found'}), 404
+            
 
-
+            #Generate new tokens
+            user_data = json.loads(json_util.dumps(user))
+            access_token = User.create_access_token(user_data)
+            print('Generated new tokens during server refresh: ', access_token)
+            response = make_response(jsonify({'token': access_token}))
+            response.status_code = 200
+            return response
+        except jwt.ExpiredSignatureError:
+            print('Token expired during refresh')
+            response = make_response(jsonify({'error': 'Token expired'}))
+            response.delete_cookie('refresh_token', path='/')
+            response.status_code = 401
+            return response
+        except jwt.InvalidTokenError:
+            print('Invalid token during refresh')
+            response = make_response(jsonify({'Error': 'Invalid token'}))
+            response.delete_cookie('refresh_token', path='/')
+            response.status_code = 401
+            return response

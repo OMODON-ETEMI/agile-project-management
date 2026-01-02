@@ -16,23 +16,19 @@ app.config['JWT_REFRESH_TOKEN_EXPIRES'] = SecurityConfig.JWT_REFRESH_TOKEN_EXPIR
 # Initialize Rate Limiter
 limiter.init_app(app)
 
-# CORS Configuration
-api_v1_cors_config = {
-    "origins": ["http://localhost:3000"],  # Frontend's URL
-    "methods": ["GET", "POST", "PUT", "DELETE","OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization", "X-User-ID"],
-    "expose_headers": ["Set-Cookie", "Authorization"], 
-    "allow_credentials": True,
-    "supports_credentials": True
-}
 
 
-CORS(app, **api_v1_cors_config) # Apply CORS to all routes
+CORS(app,
+     origins=["http://localhost:3000"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "X-User-ID"],
+     expose_headers=["Set-Cookie", "Authorization"],
+     supports_credentials=True)
 app.secret_key = SecurityConfig.JWT_SECRET_KEY
 
 
 # MongoDB Setup 
-MONGO_URI = "mongodb://localhost:27017/mydatabase"
+MONGO_URI = "mongodb://host.docker.internal:27017/mydatabase"
 client = MongoClient(MONGO_URI)
 db = client.get_database()
 

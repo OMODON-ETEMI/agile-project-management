@@ -5,8 +5,11 @@ from bson import json_util, ObjectId
 from package import db
 from dotenv import load_dotenv
 from package.config.slug import slugify
+from package.models.user_relationships import User_Activity
 import os
 from datetime import datetime , timezone
+from package.config.utility import serialize_document
+from package.config.permission import PermissionService
 
 load_dotenv()
 
@@ -14,10 +17,11 @@ SECRET_KEY = os.getenv('JWT_SECRET_KEY')
 ALGORITHM = os.getenv('JWT_ALGORITHM')
 
 class Organisation: 
-    def __init__(self, title, createdAt, updatedAt, image, description, created_By, slug):
+    def __init__(self, title, createdAt, updatedAt, image, description, created_By, slug, color):
         self.title = title
-        self.image = image
+        self.image = image or {}
         self.slug = slug
+        self.color = color
         self.description = description
         self.created_By = ObjectId(created_By)
         self.createdAt = createdAt
@@ -47,6 +51,8 @@ class Organisation:
             'createdAt' : self.createdAt,
             'created_By' : self.created_By,
             'image' : self.image,
+            'color': self.color,
+            'slug' : self.slug,
             'updatedAt' : self.updatedAt,
             'description': self.description,
             'history': []
@@ -54,7 +60,7 @@ class Organisation:
 
         new_organisation = db.organisation.find_one({'_id' : result.inserted_id})
         if new_organisation:
-            organisation_data = json.loads(json_util.dumps(new_organisation))
+            organisation_data = serialize_document(new_organisation)
             response_data = {
                 'message': f'Your {new_organisation['title']} Organisation has been created',
                 'organisation': organisation_data,
@@ -71,7 +77,7 @@ class Organisation:
         if title:
             organisations = db.organisation.find({'title': {'$regex': f'.*{title}.*', '$options': 'i'}})
             organisation_list = [json.loads(json_util.dumps(organisation)) for organisation in organisations]
-            return jsonify(organisation_list), 200
+            return organisation_list
         elif organisation_id or slug:
             conditions = []
             if organisation_id:
@@ -111,34 +117,75 @@ class Organisation:
 
             organisation = next(organisations, None)  # Get the first document or None if empty
             if organisation:
-                return jsonify({**json.loads(json_util.dumps(organisation)), "_id": str(organisation["_id"])}), 200
+                return {
+                    "success": True,
+                    "data" : {**json.loads(json_util.dumps(organisation)), "_id": str(organisation["_id"])}
+                }
             else:
-                return jsonify({"error": "Organisation not found"}), 404
-
+                return {
+                    "success": False,
+                    "message": "Organisation not found"
+                }, 404
 
     @staticmethod
-    def organisation():
-        organisations = db.organisation.find()
+    def get_User_role(organisation_id):
+        user_org = db.User_Organisation.find_one({'organisation_id': ObjectId(organisation_id)})
+        if user_org:
+            return user_org.get('role', '')
+        return ''
+    
+    @staticmethod
+    def get_last_Accessed(document, org_slug):
+        if document:
+            for doc in document:
+                if doc.get('title') == org_slug:
+                    return doc
+        return 
+    
+    @staticmethod
+    def organisation(user_id):
+        user_org = db.User_Organisation.find({'user_id': ObjectId(user_id)})
+        org_ids = [relation['organisation_id'] for relation in user_org]
+        organisations = db.organisation.find({'_id': {'$in': org_ids}})
+        last_accessed_document = User_Activity.get_last_accessed_entities(user_id=user_id, entity_type='organisation', limit= db.organisation.count_documents({}))
         organisations_list = []
         for organisation in organisations:
             organisation_id = organisation.get('_id')
-            administrator_id = organisation.get('created_By')
+            user_role = PermissionService.get_user_permissions(user_id, organisation_id) 
             workspace_count = db.Workspace.count_documents({'organisation_id': organisation_id})
             organisation['_id'] = str(organisation['_id'])
+            recent_document = Organisation.get_last_Accessed(document=last_accessed_document, org_slug=organisation.get('slug'))
             organisation_data = json.loads(json_util.dumps(organisation))
             organisation_data['workspace_count'] = workspace_count
+            organisation_data['User_role'] = user_role
+            organisation_data['lastAccessed'] = recent_document
             organisations_list.append(organisation_data)
-        # recent_document = User_Activity.get_last_accessed_entities(user_id=user_id, entity_type='Organisation', limit=2)
-        # organisations_list.append(recent_document)
         response = jsonify(organisations_list) 
         response.status_code=200
         return  response
     
     @staticmethod
-    def Update(organisation_id: str, user_id: str, title: Optional[str] = None, image : Optional[Dict] = None):
+    def Update(organisation_id: str, user_id: str, title: Optional[str] = None, image : Optional[Dict] = None, description: Optional[str] = None, slug: Optional[str] = None, color: Optional[str] = None):
         # Do NOTE: That there is more we can do here such as updating the user_id we can even remove the add access user and revoke access and add it to this function
         try:
             update_fields = {}
+            if slug is not None:
+                if isinstance(slug, str) and slug.strip():
+                    if db.organisation.find_one({'slug': slug.strip(), '_id': {'$ne': ObjectId(organisation_id)}}):
+                        return jsonify({'error': 'Slug already in use'}), 400
+                    update_fields['slug'] = slug.strip()
+                else:
+                    return jsonify({'error': 'Invalid slug'}), 400
+            if color is not None:
+                if isinstance(color, str) and color.strip():
+                    update_fields['color'] = color.strip()
+                else:
+                    return jsonify({'error': 'Invalid color'}), 400
+            if description is not None:
+                if isinstance(description, str):
+                    update_fields['description'] = description
+                else:
+                    return jsonify({'error': 'Invalid description'}), 400
             if title is not None:
                 if isinstance(title, str) and title.strip():
                     update_fields['title'] = title.strip()
@@ -170,14 +217,30 @@ class Organisation:
             return jsonify({'error' : str(e)}),500
     @staticmethod
     def delete(organisation_id,user_id):
-        result = db.organisation.delete_one({'_id': ObjectId(organisation_id), 'created_By' : ObjectId(user_id)})
-        if result.deleted_count == 1 :
+        print('trying to delete organisation')
+        workspaces = db.Workspace.find({'organisation_id': ObjectId(organisation_id)}, {'_id': 1})
+        workspace_ids = [workspace['_id'] for workspace in workspaces]
+        
+        if workspace_ids:
+            issues_result = db.Issues.delete_many({'workspace_id': {'$in': workspace_ids}})
+            comments_result = db.Comments.delete_many({'workspace_id': {'$in': workspace_ids}})
+            if issues_result.acknowledged is False:
+                return {'message' : 'Failed to Delete'}, 400
+            
+            board_result = db.Boards.delete_many({'workspace_id': {'$in': workspace_ids}})
+            if board_result.acknowledged is False:
+                return {'message' : 'Failed to Delete'}, 400
+            
+            workspaces_result = db.Workspace.delete_many({'organisation_id': ObjectId(organisation_id)})
+            if workspaces_result.acknowledged is False:
+                return {'message' : 'Failed to Delete'}, 400
+  
+        organisation_result = db.organisation.delete_one({'_id': ObjectId(organisation_id), 'created_By' : ObjectId(user_id)})
+        if organisation_result.deleted_count == 1 :   
+            PermissionService.remove_user_from_organization(user_id, organisation_id)
             message = {'message' : f'Deleted Successfully' }
-            projectcollection = db.get_collection('projects')
-            taskcollection = db.get_collection('tasks')
-            projectcollection.delete_many({'assigned_organisation': ObjectId(organisation_id)})
-            taskcollection.delete_many({'assigned_organisation': ObjectId(organisation_id)})
             return message, 200
         else : 
+            print("Failed to delete organisation.")
             message = {'message' : f'Failed to Delete'}
             return message, 400

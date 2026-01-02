@@ -1,7 +1,6 @@
 from functools import wraps
 from flask import request, current_app
 from datetime import datetime, timezone, timedelta
-import jwt
 from pymongo import ASCENDING
 from pymongo.errors import PyMongoError
 from package import db
