@@ -1,10 +1,14 @@
 const mongoose = require('mongoose');
 const express = require('express');
+const cookieParser = require('cookie-parser');
 const http = require('http')
 const { Server } = require('socket.io')
 const cors = require('cors');
-const { issueRouter, projectRouter } = require('./Model/router');
+const { issueRouter, projectRouter, notificationRouter } = require('./Model/router');
 const { initSocket } = require('./utility/socket')
+const subscriber = require('./utility/subscriber')
+const dotenv =  require('dotenv');
+const { authMiddleware } = require('./utility/auth.js');
 
 const app = express();
 
@@ -13,11 +17,11 @@ const server = http.createServer(app)
 const io = new Server(server, {
   cors: {
     origin: 'http://localhost:3000',
-    methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE']
+    methods: ['GET', 'POST', 'PATCH', 'OPTIONS', 'PUT', 'DELETE']
   }
 });
 
-const uri = 'mongodb://localhost:27017/mydatabase';
+const uri = 'mongodb://host.docker.internal:27017/mydatabase';
 
 const corsOptions = {
   origin: 'http://localhost:3000',
@@ -27,17 +31,28 @@ const corsOptions = {
 mongoose.connect(uri)
   .then(() => {
     console.log("Connected to MongoDB");
-    initSocket(io)
-
-    app.use(cors(corsOptions))
-    app.use(express.json());
-    app.use(issueRouter)
-    app.use(projectRouter);
-
+    initSocket(io);
+    
     app.get('/', (req, res) => {
       res.send('Hello world');
     });
 
+    app.use(cors(corsOptions));
+    app.use(express.json());
+    app.use(cookieParser());
+    app.use(authMiddleware)
+    app.use(issueRouter);
+    app.use(projectRouter);
+    app.use(notificationRouter);
+
+
+    app.get("/protected", (req, res) => {
+  // req.user is available here
+  res.json({ message: `Hello ${req.user.username}` });
+});
+
+    dotenv.config();
+    subscriber.start();
     io.on('connection', (socket) => {
       console.log('A client connected:', socket.id);
 

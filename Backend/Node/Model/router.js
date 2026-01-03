@@ -1,4 +1,4 @@
-const express = require("express");
+
 const mongoose = require("mongoose");
 const { validateObjectId, validateInsertIds } = require("../utility/validation");
 const upload = require("../utility/multer");
@@ -17,11 +17,24 @@ const {
   getProjectsByCategory,
 } = require("../Controller/projectController");
 
+const {
+  createNotification,
+  getNotifications,
+  unreadCountOnly,
+  markNotificationsAsRead,
+  deleteNotifications,
+} = require("../Controller/notificationController");
+
+
 const { BurndownData, VelocityTracking } = require("../Controller/metrics");
 
-// Issue Routes
-const issueRouter = express.Router();
+const issueRouter = require("express").Router();
+const projectRouter = require("express").Router();
+const notificationRouter = require("express").Router();
 
+
+
+// Issue Routes
 issueRouter.post("/issue/create", async (req, res) => {
   try {
     const issue = await createIssue(req.body);
@@ -202,8 +215,6 @@ issueRouter.delete(
 );
 
 // Project Routes
-const projectRouter = express.Router();
-
 projectRouter.post("/project/create", async (req, res) => {
   try {
     const { name, creator } = req.body;
@@ -373,7 +384,46 @@ projectRouter.delete(
   }
 );
 
+// Notification Routes
+notificationRouter.post("/notification/create", async (req, res) => {
+  const result = await createNotification(req.body);
+  res.status(201).json({ message: "Notification creation initiated" });
+});
+
+notificationRouter.get('/notification', async (req, res) => {
+  const notifications = await getNotifications(req.query);
+  console.log("Notifications retrieved:", notifications);
+  res.status(200).json({ message: "Notification retrieval initiated", data: notifications });
+});
+
+notificationRouter.get('/notification/unreadCount', async (req, res) => {
+  const count = await unreadCountOnly(req.query);
+  res.status(200).json({ message: "Unread count retrieval initiated", data: count });
+});
+
+notificationRouter.patch('/notification/:notificationId/read', async (req, res) => {
+  const notificationId = req.params.notificationId;
+  await markNotificationsAsRead(req.body);
+  res.status(200).json({ message: "Mark as read initiated" });
+}); 
+
+notificationRouter.patch('/notification/markAsRead', async (req, res) => {
+  await markNotificationsAsRead(req.body);
+  res.status(200).json({ message: "Mark as read initiated" });
+});
+
+notificationRouter.delete('/notification/:id', async (req, res) => {
+  await deleteNotifications(req.body);
+  res.status(200).json({ message: "Notification deletion initiated" });
+});
+
+notificationRouter.delete('/notification/clearAll', async (req, res) => {
+  await deleteNotifications({ notificationIds: 'all', recipientId: req.body.recipientId });
+  res.status(200).json({ message: "All notifications deletion initiated" });
+});
+
 module.exports = {
   issueRouter,
   projectRouter,
+  notificationRouter
 };

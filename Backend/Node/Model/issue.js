@@ -343,4 +343,4 @@ async function searchIssue(queryParam){
     }
 }
 
-module.exports = { Issue, searchIssue, generateId };
+module.exports = { Issue, generateId };
