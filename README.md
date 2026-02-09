@@ -5,8 +5,8 @@ A full-stack, enterprise-grade **Agile project management solution** for trackin
 ## 🖥 Tech Stack
 
 ### Frontend
-- **Framework**: React (TypeScript)
-- **UI**: TailwindCSS, Material UI
+- **Framework**: Nextjs (TypeScript)
+- **UI**: TailwindCSS, Chadcn UI
 - **State Management**: Redux Toolkit
 - **Build Tooling**: Vite / Webpack
 - **API Integration**: Axios, React Query
