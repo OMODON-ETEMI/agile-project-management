@@ -1,5 +1,5 @@
 from package import app, db
-from flask import request, jsonify, g, Response
+from flask import request, jsonify, g, Response, make_response
 from package.config.rate_limiter import limiter
 from dateutil import parser
 import json
@@ -13,7 +13,8 @@ from package.models.organisation import Organisation
 from package.models.workspace import Workspace
 from package.models.notification import invite_notification, role_update_notification, remove_user_notification, delete_organisation_notification, update_organisation_notification
 from package.models.user_relationships import User_Workspace, User_Activity, User_Organisation
-from package.config.utility import get_ip_address, auth_reqired, require_organization_permission, require_workspace_permission, admin_only
+from package.config.security import SecurityConfig
+from package.config.utility import get_ip_address, auth_reqired, require_organization_permission, require_workspace_permission, admin_only, require_either_permission
 from package.config.permission import PermissionService
 from package.config.import_issue import import_issue
 from package.middleware import check_list
@@ -206,18 +207,37 @@ def create():
                 }), 409
             else :
                 user = User(username, email, password, firstname, lastname, role , image, createdAt, updatedAt)
-                response = user.createUser()
+                user_data, access_token, refresh_token = user.createUser()
+                if not user_data:
+                    return jsonify({'Error': 'Failed to create account'}), 500
+                
+                response = make_response(jsonify({
+                        'response': f'Your Account has been created, {user_data["firstname"]}',
+                        'token': access_token
+                    }))
+                response.set_cookie('refresh_token',
+                                     refresh_token, 
+                                     httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY ,
+                                     secure= SecurityConfig.SESSION_COOKIE_SECURE, 
+                                     samesite= SecurityConfig.SESSION_COOKIE_SAMESITE, 
+                                     max_age=60 * 60 * 24 * 7,  # 7 days
+                                     path= '/', )
+                response.status_code = 201
                 return response
     else : 
         return jsonify({
             'message' : 'One or more fields are missing or empty'
         }), 404
     
+
 @app.route('/user', methods=['GET'])
+@limiter.limit("30 per minute")
+@auth_reqired
+@require_either_permission('view_user', 'view_organization')
 def user():
     user = User
-    data = user.user()
-    return data
+    users = user.user()
+    return jsonify(users), 200
 
 @app.route('/find', methods=['GET'])
 def find():
@@ -226,15 +246,17 @@ def find():
     if not data: 
         return jsonify({'error': 'Invalid or Missing JSON in request'}), 404
     id = data.get('_id')
-    res = find.find_user(id)
-    return res
+    user = find.find_user(id)
+    if user:
+        return jsonify(user), 200
+    return jsonify({'Error': 'User not found'}), 404
 
 @app.route('/users/search', methods=['GET'])
 def search():
     query = request.args.get('name')
     if check_list([query]):    
-        resp = User.search(query)
-        return resp
+        users = User.search(query)
+        return jsonify(users), 200
     else :
          return jsonify({
             'message' : 'Enter a name to search'
@@ -251,7 +273,7 @@ def UserData():
         return jsonify(response), 200
     else :
          return jsonify({
-            'Error' : 'User not found'
+            'Error' : 'User data not found'
         }), 404
          
 @app.route('/login', methods=['POST'])
@@ -328,9 +350,16 @@ def create_board():
         }), 400
     info = [title, user_id, createdAt, workspace_id]
     if check_list(info):
+        if type == 'Sprint' and (not startDate or not endDate or startDate >= endDate):
+            return jsonify({'Error': 'Valid start and end dates are required for a sprint'}), 400
         board = Board(title, type, user_id, createdAt, workspace_id, image, startDate, endDate)
-        response = board.create_board()
-        return response
+        new_board = board.create_board()
+        if new_board:
+            return jsonify({
+                'message': f'Your {new_board["title"]} Board has been created',
+                'board': new_board
+            }), 201
+        return jsonify({'message': 'failed to create board'}), 500
     else :
         return jsonify({
             'message' : "One or more fields are missing"
@@ -339,26 +368,32 @@ def create_board():
 # search for a board by title or workspace_id 
 @app.route('/board/search', methods=['GET', 'POST'])
 @auth_reqired
+# @require_workspace_permission('view_workspace')
 def search_title():
     if request.method == 'GET' :
         result = Board.search(title=request.args.get('title'))
-        return result
+        if result is not None:
+            return jsonify(result), 200
+        return jsonify({'message': 'No boards found with the given title'}), 404
     elif request.method == 'POST':
-        result = Board.board_in_workspace(workspace_id = request.json.get('workspace_id'))
-        return result
+        workspace_id = request.json.get('workspace')
+        board_id = request.json.get('_id')
+        result = None
+        if board_id:
+            result = Board.board_ID(ID=board_id)
+        elif workspace_id:
+            result = Board.board_in_workspace(workspace_identifier=workspace_id)
+        elif not workspace_id and not board_id:
+            return jsonify({"Error" : "Enter a Parameter to search"}), 400
+        
+        if result is not None:
+            return jsonify(result), 200
+        return jsonify({'message': 'Board not found'}), 404
     else : 
         return jsonify({
-            "Error" : "Enter a the Board title to search"
+            "Error" : "Enter a Parameter to search"
         }), 400
     
-# search for a board by ID 
-@app.route('/board/ID', methods=['GET'])
-@auth_reqired
-def search_ID():
-    data = request.json
-    if data : return Board.board_ID(ID=data.get('ID'))
-    else :  return { "Error" : "Invalid search parameters"}
-
 # Update Board
 @app.route('/board/update', methods=['PATCH'])
 @auth_reqired
@@ -375,8 +410,14 @@ def update_board():
     workspace_id = data.get('workspace_id')
     board_id=data.get('board_id')
     if check_list([board_id, user_id]):
-        response = Board.Update(board_id=board_id, workspace_id=workspace_id, user_id=user_id, start_date=start_date, end_date=end_date, title=title, image=image)
-        return response
+        updated_board = Board.Update(board_id=board_id, workspace_id=workspace_id, user_id=user_id, start_date=start_date, end_date=end_date, title=title, image=image)
+        if updated_board:
+            return jsonify({
+                'message': 'Board updated successfully',
+                'data': updated_board,
+            }), 200
+        else:
+            return jsonify({'error': 'Update failed or invalid data'}), 400
     else :
             return jsonify({
         'Error' : 'Pleease enter the required fields'
@@ -388,8 +429,10 @@ def update_board():
 def delete_board():
     data=request.json
     if data: 
-        response = Board.delete(board_id=data.get('board_id'),user_id=data.get('user_id'))
-        return response
+        success = Board.delete(board_id=data.get('board_id'),user_id=data.get('user_id'))
+        if success:
+            return jsonify({'message' : 'Deleted Successfully'}), 200
+        return jsonify({'message' : 'Failed to Delete'}), 400
     else :
         return jsonify({
             'Error' : "Error Deleting Board"
@@ -415,24 +458,29 @@ def create_organisation():
     updatedAt = createdAt
     info = [title, createdAt, created_By]
     if check_list(info):
-        organisation = Organisation(title, createdAt, updatedAt, image, description, created_By, slug, color)
-        response = organisation.create_organisation()
-        organisation = response.get_json()
-        user_organisation = User_Organisation( user_id= created_By, organisation_id=organisation['organisation']['_id'], role = role ,  joined_at= createdAt) 
+        org_model = Organisation(title, createdAt, updatedAt, image, description, created_By, slug, color)
+        new_organisation = org_model.create_organisation()
+        if not new_organisation:
+            return jsonify({'message' : 'failed to create organisation'}), 500
+
+        user_organisation = User_Organisation( user_id= created_By, organisation_id=new_organisation['_id'], role = role ,  joined_at= createdAt) 
         user_organisation_response = user_organisation.create_User_Organisation()
         if not user_organisation_response.get('success'):
             print("Failed to add creator as a member.")
-            Organisation.delete(organisation_id=organisation['organisation']['_id'], user_id=created_By)
+            Organisation.delete(organisation_id=new_organisation['_id'], user_id=created_By)
             return jsonify({
                 'message': "Organisation created, but failed to add creator as a member."
             }), 500
-        if (PermissionService.invite_user_to_organization( created_By, organisation['organisation']['_id'], role)) != True:
-            Organisation.delete(organisation_id=organisation['organisation']['_id'], user_id=created_By)
-            User_Organisation.revoke_User_Organisation(organisation_id=organisation['organisation']['_id'], user_id=created_By)
+        if (PermissionService.invite_user_to_organization( created_By, new_organisation['_id'], role)) != True:
+            Organisation.delete(organisation_id=new_organisation['_id'], user_id=created_By)
+            User_Organisation.revoke_User_Organisation(organisation_id=new_organisation['_id'], user_id=created_By)
             return jsonify({
                 'message': "Organisation created, but failed to set permissions for creator."
             }), 500
-        return response, 201
+        return jsonify({
+            'message': f'Your {new_organisation["title"]} Organisation has been created',
+            'organisation': new_organisation
+        }), 201
     else :
         return jsonify({
             'message' : "One or more fields are missing"
@@ -550,22 +598,23 @@ def update_user_role_in_organization():
 # search for Organisation by name or ID 
 @app.route('/organisation/search', methods=['GET', 'POST'])
 @auth_reqired
+@require_organization_permission('view_organization')
 def search_organisation():
     if request.method == 'GET' :
-        result = Organisation.search(title=request.args.get('title'))
+        result = Organisation.search(title=request.args.get('title'), user_id=g.user_id)
         return result
     elif request.json:
         data = request.json  
         if data.get('organisation_id'):
-            result = Organisation.search(organisation_id=data.get('organisation_id'))
-            if result.get('success') == False:
-                return jsonify(result.get('message')), 404
-            return jsonify(result.get('data')), 200
+            result = Organisation.search(organisation_id=data.get('organisation_id'), user_id=g.user_id)
+            if result:
+                return jsonify(result), 200
+            return jsonify({'message': 'Organisation not found'}), 404
         elif data.get('slug'):
-            result = Organisation.search(slug=data.get('slug'))
-            if result.get('success') == False:
-                return jsonify(result.get('message')), 404
-            return jsonify(result.get('data')), 200
+            result = Organisation.search(slug=data.get('slug'), user_id=g.user_id)
+            if result:
+                return jsonify(result), 200
+            return jsonify({'message': 'Organisation not found'}), 404
     else : 
         return jsonify({
             "Error" : "Error in your search"
@@ -576,8 +625,8 @@ def search_organisation():
 @auth_reqired
 def all_organisation():
     try:
-        response = Organisation.organisation(user_id = g.user_id)
-        return response, 200
+        organisations = Organisation.organisation(user_id = g.user_id)
+        return jsonify(organisations), 200
     except Exception as e:
          return jsonify({
             "Error" : str(e)
@@ -611,7 +660,7 @@ def user_in_organisation():
         resp = User_Organisation.Search_Users_in_Organisation(organisation_id, query, page, limit)
         return jsonify(resp), 200
     
-    resp = User_Organisation.Users_in_Organisation(organisation_id)
+    resp = User_Organisation.Users_in_Organisation(organisation_id, user_id=g.user_id)
     return jsonify(resp), 200
 
 
@@ -631,7 +680,12 @@ def update_organisation():
     image=data.get('image')
     organisation_id = data.get('organisation_id') or data.get('_id')
     if check_list([organisation_id, user_id]):
-        response = Organisation.Update(organisation_id=organisation_id, user_id=user_id, title=title, image=image, slug=slug, description=description, color=color)
+        updated_org = Organisation.Update(organisation_id=organisation_id, user_id=user_id, title=title, image=image, slug=slug, description=description, color=color)
+        if not updated_org:
+            return jsonify({'error': 'Update failed or invalid data'}), 400
+        
+        response = jsonify({"message" : "organisation updated succesfully", 'data' : updated_org, }), 200
+
         userss = []
         users = User_Organisation.Users_in_Organisation(organisation_id).get('results', [])
         for usr in users:
@@ -645,7 +699,7 @@ def update_organisation():
             actor_avatar=g.avatar,
             org_id=organisation_id,
             org_name= organisation_name,
-            updated_fields={ key : value for key, value in data.items() if key not in ['user_id', 'organisation_id', '_id']}
+            changed_fields={ key : value for key, value in data.items() if key not in ['user_id', 'organisation_id', '_id']}
         )
         publish_event('organization_events', notification)
         return response
@@ -664,8 +718,12 @@ def delete_organisation():
     user_id = g.user_id
     if not data: 
         return jsonify({'error': 'Invalid or Missing JSON in request'}), 404   
-    response = Organisation.delete(organisation_id, user_id)
-    if response[1] == 200:
+    
+    success = Organisation.delete(organisation_id, user_id)
+    
+    if success:
+        response = jsonify({'message' : 'Deleted Successfully'}), 200
+
         userss = []
         users = User_Organisation.Users_in_Organisation(organisation_id).get('results', [])
         for usr in users:
@@ -681,6 +739,8 @@ def delete_organisation():
             org_name= organisation_name,
         )
         publish_event('organization_events', notification)
+    else:
+        response = jsonify({'message' : 'Failed to Delete'}), 400
     return response
 
     
@@ -707,18 +767,18 @@ def create_worskapce():
             'message' : "One or more fields are missing"
         }), 400
     workspace = Workspace(title, createdAt, image, description, organisation_id, created_By)
-    workspace_response = workspace.create_Workspace()
-    if workspace_response.status_code != 201:
-        return workspace_response
-    response_data = workspace_response.get_json()
-    workspace_id = response_data['Workspace']['_id']['$oid']
+    new_workspace = workspace.create_Workspace()
+    if not new_workspace:
+        return jsonify({'message' : 'failed to create workspace'}), 500
+
+    workspace_id = new_workspace['_id']
     if not check_list([workspace_id, role, created_By, createdAt, role]):
         return jsonify({
             'Error':'Please enter the required fields'
         }), 400
     access_workspace = User_Workspace(created_By,workspace_id,organisation_id,role,createdAt)
-    access_response = access_workspace.create_User_Workspace()
-    if access_response[1] != 201:
+    success = access_workspace.create_User_Workspace()
+    if not success:
         return jsonify({
             'message': "Workspace created, but failed to add creator as a member."
         }), 500
@@ -739,58 +799,39 @@ def create_worskapce():
         'organisation_id': organisation_id,
         'created_by': created_By
     })
-    return workspace_response     
-
-# @app.route('/workspaces/invite', methods=['POST'])
-# @require_workspace_permission('invite_users_to_workspace')
-# def invite_user_to_workspace():
-#     """Invite user to workspace"""
-#     data = request.get_json()
-#     user_id = data.get('user_id')
-#     workspace_id = data.get('workspace_id')
-#     role = data.get('role', 'Viewer')
-    
-#     try:
-#         workspace = Workspace.search(workspace_id=workspace_id)
-#         org_id = workspace.get_json()['organisation_id']['$oid']
-
-#         success = PermissionService.invite_user_to_workspace(
-#             user_id, org_id, workspace_id, role
-#         )
-        
-#         if success:
-#             return jsonify({'message': 'User invited to workspace successfully'}), 200
-#         else:
-#             return jsonify({'error': 'Failed to invite user'}), 400
-            
-#     except ValueError as e:
-#         return jsonify({'error': str(e)}), 400       
+    return jsonify({
+        'message': f'Your {new_workspace["title"]} workspace has been created',
+        'Workspace': new_workspace
+    }), 201   
     
 # search for workspace
 @app.route('/workspace/search', methods=['GET', 'POST'])
 @auth_reqired
+@require_either_permission('view_workspaces', 'view_workspace')
 def search_workspace():
     if request.method == 'GET':
         title = request.args.get('title')
-        result = Workspace.search(title=title)
-        return jsonify(result), 200
+        workspaces = Workspace.search(title=title, user_id=g.user_id)
+        return jsonify(workspaces), 200
 
     if request.method == 'POST' and request.is_json:
         data = request.get_json()
+        result = None
 
         if not data:
             return jsonify({'error': 'Missing or invalid JSON'}), 400
 
         if 'organisation_id' in data:
-            result = Workspace.search(organisation_id=data['organisation_id'])
+            result = Workspace.search(organisation_id=data['organisation_id'], user_id=g.user_id)
         elif 'workspace_id' in data:
-            result = Workspace.search(workspace_id=data['workspace_id'])
+            result = Workspace.search(workspace_id=data['workspace_id'], user_id=g.user_id)
         elif 'slug' in data:
-            result = Workspace.search(slug=data['slug'])
+            result = Workspace.search(slug=data['slug'], user_id=g.user_id)
         else:
             return jsonify({'error': 'Missing required search parameter'}), 400
-
-        return result
+        if result is not None:
+            return jsonify(result), 200
+        return jsonify({'error': 'Workspace not found'}), 404
 
     return jsonify({"error": "Invalid Request"}), 400
     
@@ -800,7 +841,7 @@ def search_workspace():
 def recent_workspace():
     try:
         response = User_Activity.get_last_accessed_entities(user_id= g.user_id, entity_type='Workspace', limit=2)
-        return response
+        return jsonify(response), 200
     except Exception as e:
          return jsonify({
             "Error" : str(e)
@@ -830,8 +871,9 @@ def grant_access():
             )
             
             if success:
-                response = User_Workspace.create_User_Workspace(workspace_id, user_id, role, joined_at)
-                return response
+                success_add = User_Workspace.create_User_Workspace(workspace_id, user_id, role, joined_at)
+                if success_add:
+                    return jsonify({'message': 'User invited to workspace successfully'}), 201
             else:
                 return jsonify({'error': 'Failed to invite user'}), 400
         else :
@@ -858,15 +900,16 @@ def remove_access():
         success = PermissionService.remove_user_from_workspace( user_id, org_id, workspace_id )
         if not success:
             return jsonify({'error': 'Failed to remove user'}), 400
-        response = User_Workspace.revoke_User_Workspace(workspace_id, user_id)
-        return response
+        revoked = User_Workspace.revoke_User_Workspace(workspace_id, user_id)
+        if revoked:
+            return jsonify({'message' : 'User has been removed from this Workspace'}), 200
     else :
          return jsonify({
             'Error' : 'Pleease enter the required fields'
         }), 404
 
 # get all user in a workspace
-@app.route('/workspace/users', methods=['GET'])
+@app.route('/workspace/users', methods=['POST'])
 @auth_reqired
 def user_in_workspace():
     data = request.json
@@ -874,8 +917,8 @@ def user_in_workspace():
         return jsonify({'error': 'Invalid or Missing JSON in request'}), 404
     workspace_id = data.get('workspace_id')
     if check_list([workspace_id]):
-        response = User_Workspace.Users_in_Workspace(workspace_id)
-        return response
+        users = User_Workspace.Users_in_Workspace(workspace_id)
+        return jsonify(users), 200
     else : 
         return jsonify({'error': 'No Workspace Selected'}), 400
     
@@ -891,8 +934,10 @@ def update_workspace():
     image=data.get('image')
     workspace_id = data.get('workspace_id')
     if check_list([workspace_id, user_id]):
-        response = Workspace.Update(workspace_id=workspace_id, user_id=user_id, title=title, image=image)
-        return response
+        updated_workspace = Workspace.Update(workspace_id=workspace_id, user_id=user_id, title=title, image=image)
+        if updated_workspace:
+            return jsonify({"message" : "Workspace updated succesfully", 'data' : updated_workspace }), 200
+        return jsonify({'error' : 'Update failed or invalid data'}), 400
     else :
             return jsonify({
         'Error' : 'Pleease enter the required fields'
@@ -904,8 +949,10 @@ def update_workspace():
 def delete_workspace():
     data=request.json
     if data: 
-        response = Workspace.delete(Workspace_id= data.get('workspace_id'),user_id=data.get('user_id'))
-        return response
+        success = Workspace.delete(Workspace_id= data.get('workspace_id'),user_id=data.get('user_id'))
+        if success:
+            return jsonify({'message' : 'Deleted Successfully'}), 200
+        return jsonify({'message' : 'Failed to Delete'}), 400
     else :
         return jsonify({
             'Error' : "Error Deleting Workspace"
@@ -920,8 +967,10 @@ def workspace_board():
         return jsonify({'error': 'Invalid or Missing JSON in request'}), 404
     workspace_id = data.get('workspace_id')
     if check_list([workspace_id]):
-        response = Board.board_in_workspace(workspace_id)
-        return response
+        boards = Board.board_in_workspace(workspace_id, user_id=g.user_id)
+        if boards is not None:
+            return jsonify(boards), 200
+        return jsonify({'message': 'No boards found in this workspace'}), 404
     else : 
         return jsonify({'error': 'No Workspace Selected'}), 400
 

@@ -8,9 +8,25 @@ dayjs.extend(customParseFormat);
 
 async function createIssue(issueData) {
   try {
+    // EPIC CREATION LOGIC
+    if (issueData.issuetype === "Epic") {
+      issueData.board_id = null;
+      issueData.position = 0; // Epics are not board-positioned
+    } else {
+      // NON-EPIC (Board Item)
+      const position = await Issue.countDocuments({
+        board_id: issueData.board_id,
+        issuetype: { $ne: "Epic" } // never count epics
+      });
+
+      issueData.position = position + 1;
+    }
+
     const issue = new Issue(issueData);
     await issue.save();
-    emitSocketEvent('IssueCreated', issue);
+
+    emitSocketEvent("IssueCreated", issue);
+
     return issue;
   } catch (error) {
     throw new Error(`Issue creation failed: ${error.message}`);
@@ -19,117 +35,337 @@ async function createIssue(issueData) {
 
 async function searchIssues(queryParams) {
   try {
+    const mongoQuery = {};
+    const {
+      workspace_id,
+      board_id,
+      creator,
+      epicId,
+      assignee,
+      issueType,
+      status,
+      priority,
+      search,
+      includeEpics,
+      page = 1,
+      limit = 50,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = queryParams;
 
-    const mongoQuery = {}
-    // Clean up query parameters
-    Object.keys(queryParams).forEach(key =>
-      queryParams[key] === undefined || "" && delete queryParams[key]
-    );
-    if (Object.keys(queryParams).includes('workspace_id')) {
-      mongoQuery.workspace_id = new mongoose.Types.ObjectId(queryParams.workspace_id);
-    }
-    if (Object.keys(queryParams).includes('board_id')) {
-      mongoQuery.board_id = new mongoose.Types.ObjectId(queryParams.board_id);
-    }
-    if (Object.keys(queryParams).includes('creator')) {
-      mongoQuery.creator = new mongoose.Types.ObjectId(queryParams.creator);
+    // ------------------------------------------------
+    // Mandatory Scope (Workspace Required)
+    // ------------------------------------------------
+    if (!workspace_id) {
+      throw new Error("workspace_id is required");
     }
 
-    if (queryParams.title) {
-      mongoQuery.title = { $regex: queryParams.title, $options: 'i' };
+    mongoQuery.workspace_id = new mongoose.Types.ObjectId(workspace_id);
+
+    // ------------------------------------------------
+    // Board Scope
+    // ------------------------------------------------
+    if (board_id) {
+      mongoQuery.board_id = new mongoose.Types.ObjectId(board_id);
     }
 
-    // Add other query parameters to mongoQuery as needed
-    for (const key in queryParams) {
-      if (!['workspace_id', 'title', 'board_id', 'creator'].includes(key)){
-        mongoQuery[key] = queryParams[key];
+    // ------------------------------------------------
+    // Creator Filter
+    // ------------------------------------------------
+    if (creator) {
+      mongoQuery.creator = new mongoose.Types.ObjectId(creator);
+    }
+
+    // ------------------------------------------------
+    // Assignee Filter (multi support)
+    // ------------------------------------------------
+    if (assignee) {
+      mongoQuery.assignees = {
+        $in: Array.isArray(assignee)
+          ? assignee.map(id => new mongoose.Types.ObjectId(id))
+          : [new mongoose.Types.ObjectId(assignee)],
+      };
+    }
+
+    // ------------------------------------------------
+    // Status Filter (multi support)
+    // ------------------------------------------------
+    if (status) {
+      mongoQuery.status = {
+        $in: Array.isArray(status) ? status : [status],
+      };
+    }
+
+    // ------------------------------------------------
+    // Priority Filter (multi support)
+    // ------------------------------------------------
+    if (priority) {
+      mongoQuery.priority = {
+        $in: Array.isArray(priority) ? priority : [priority],
+      };
+    }
+
+    // ------------------------------------------------
+    // Issue Type Logic (Epic handling)
+    // ------------------------------------------------
+    if (issueType) {
+      mongoQuery.issuetype = issueType;
+    } else {
+      // EXCLUDE Epics by default (Jira behavior)
+      if (!includeEpics) {
+        mongoQuery.issuetype = { $ne: "Epic" };
       }
     }
 
-    const issues = await Issue.find(mongoQuery);
-    return issues;
+    // ------------------------------------------------
+    // Text Search (Title + Description)
+    // ------------------------------------------------
+    if (search) {
+    mongoQuery.$text = { $search: search };
+    }
+
+  if (epicId) {
+  mongoQuery.parentEpic = new mongoose.Types.ObjectId(epicId);
+  }
+
+  if (queryParams.updatedAfter) {
+  mongoQuery.updatedAt = { $gte: new Date(queryParams.updatedAfter) };
+}
+
+if (queryParams.unresolvedOnly) {
+  mongoQuery.status = { $nin: ["Done", "Cancelled"] };
+}
+
+    // ------------------------------------------------
+    // Sorting
+    // ------------------------------------------------
+    const sortOptions = {
+      [sortBy]: sortOrder === "asc" ? 1 : -1,
+    };
+
+    // ------------------------------------------------
+    // Pagination
+    // ------------------------------------------------
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const [issues, total] = await Promise.all([
+      Issue.find(mongoQuery)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(Number(limit)),
+      Issue.countDocuments(mongoQuery),
+    ]);
+
+    return {
+      data: issues,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        pages: Math.ceil(total / limit),
+      },
+    };
   } catch (error) {
     throw new Error(`Issue search failed: ${error.message}`);
   }
 }
 
-async function updateIssue(updateData) {
-  const { ID, user_id = creator } = updateData;
-
-  const allowedUpdates = [
-    'name', 'description', 'category',
-    'project', 'parent', 'assigned_users',
-    'priority', 'status', 'estimate', 'board_id'
-  ];
-
-  const updates = Object.keys(updateData)
-    .filter(update => allowedUpdates.includes(update))
-    .reduce((acc, key) => {
-      acc[key] = updateData[key];
-      return acc;
-    }, {});
-
-  if (Object.keys(updates).length === 0) {
-    throw new Error('No valid update parameters');
+async function getEpics(workspace_id) {
+  if (!workspace_id) {
+    throw new Error("workspace_id is required");
   }
 
-  const oldIssue = await Issue.findById(ID)
-  if(!oldIssue){
-    throw new Error("No Issue Found")
+  return Issue.find({
+    workspace_id: new mongoose.Types.ObjectId(workspace_id),
+    issuetype: "Epic",
+  }).sort({ createdAt: -1 });
+}
+
+async function updateIssueMetadata({ issueId, updates }, user_id) {
+  const allowedUpdates = new Set([
+    "title",
+    "description",
+    "storyPoints",
+    "status",
+    "board_id",
+    "assignees",
+    "priority",
+    "parent",
+    "epic",
+    "endDate",
+    "color",
+    "resolutionId"
+  ]);
+
+  const sanitizedUpdates = Object.fromEntries(
+    Object.entries(updates).filter(([key]) => allowedUpdates.has(key))
+  );
+
+  if (Object.keys(sanitizedUpdates).length === 0) {
+    throw new Error("No valid update fields provided");
   }
 
-  const hasChanges = Object.keys(updates).some(
-    key => JSON.stringify(oldIssue[key] !== JSON.stringify(updates[key]))
-  )
+  const issue = await Issue.findById(new mongoose.Types.ObjectId(issueId));
+  if (!issue) throw new Error("Issue not found");
 
-  if(!hasChanges){
-    throw new Error('No changes Detected')
+  const historyEntries = [];
+
+  for (const key of Object.keys(sanitizedUpdates)) {
+    if (JSON.stringify(issue[key]) !== JSON.stringify(sanitizedUpdates[key])) {
+      historyEntries.push({
+        field: key,
+        oldValue: issue[key],
+        newValue: sanitizedUpdates[key],
+        updatedBy: user_id,
+        updatedAt: new Date()
+      });
+
+      issue[key] = sanitizedUpdates[key];
+    }
   }
+
+  if (historyEntries.length === 0) {
+    throw new Error("No changes detected");
+  }
+
+  issue.updateHistory.push(...historyEntries);
+  issue.updatedAt = new Date();
+
+  await issue.save();
+
+  emitSocketEvent("IssueUpdated", issue);
+  return issue;
+}
+
+async function transitionIssueStatus({ issueId, status }, user_id) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    if (updateData.issues || updateData.projects){
-      if (!updateData.issues.every(id => mongoose.Types.ObjectId.isValid(id)) || !updateData.projects.every(id => mongoose.Types.ObjectId.isValid(id)) ) {
-        throw new Error('Invalid ObjectId in dependency array');
-      }
-      updates.$addToSet = {
-        'dependencies.issues': { $each : updateData.issues},
-        'dependencies.projects': {$each : updateData.projects}
-      }
+    const issue = await Issue.findById(issueId).session(session);
+    if (!issue) throw new Error("Issue not found");
+
+    if (issue.status === status) {
+      throw new Error("Status already set");
     }
-    const historyEntries = Object.key(updates).filter(key => JSON.stringify(oldproject[key]) !== JSON.stringify(updates[key])).map(field => ({
-      field,
-      oldVlaue: oldIssue[field],
-      newVlaue: updates[field],
+
+    issue.status = status;
+    issue.statusHistory.push({
+      status,
+      timestamp: new Date(),
+      changedBy: user_id
+    });
+
+    issue.updateHistory.push({
+      field: "status",
+      oldValue: issue.status,
+      newValue: status,
       updatedBy: user_id,
-      updateAt: new Date()
-    }))
+      updatedAt: new Date()
+    });
 
-    if (updates.status && oldIssue.status !== updates.status){
-      updates.statusHistory = [
-        ...oldIssue.statusHistory,
-        {
-          status: updates.status,
-          timestamp: new Date(),
-          changedBy: user_id
-        }
-      ];
-    }
-    const issue = await Issue.findOneAndUpdate(
-      { _id },
-      {
-        ...updates,
-        $push : { updateHistory : { $each : historyEntries, $slice: -5}}
-      },
-      { new: true }
-    );
+    issue.updatedAt = new Date();
 
-    if (!issue) return null;
+    await issue.save({ session });
 
-    emitSocketEvent('IssueUpdated', issue);
+    await session.commitTransaction();
+    session.endSession();
+
+    emitSocketEvent("IssueStatusChanged", issue);
     return issue;
-  } catch (error) {
-    throw new Error(`Issue update failed: ${error.message}`);
+
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    throw err;
   }
 }
+
+async function moveIssue({ issueId, board_id, status, position }, user_id) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const issue = await Issue.findById(issueId).session(session);
+    if (!issue) throw new Error("Issue not found");
+
+    const oldBoard = issue.board_id;
+    const oldStatus = issue.status;
+
+    // Shift issues in target column
+    await Issue.updateMany(
+      {
+        board_id,
+        status,
+        position: { $gte: position }
+      },
+      { $inc: { position: 1 } },
+      { session }
+    );
+
+    issue.board_id = board_id;
+    issue.status = status;
+    issue.position = position;
+
+    if (!oldBoard.equals(board_id)) {
+      issue.boardHistory.push({
+        board_id,
+        action: "added",
+        timestamp: new Date(),
+        movedBy: user_id
+      });
+    }
+
+    if (oldStatus !== status) {
+      issue.statusHistory.push({
+        status,
+        timestamp: new Date(),
+        changedBy: user_id
+      });
+    }
+
+    issue.updatedAt = new Date();
+
+    await issue.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    emitSocketEvent("IssueMoved", issue);
+    return issue;
+
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    throw err;
+  }
+}
+
+async function reorderColumn({ board_id, status, orderedIssueIds }, user_id) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    for (let i = 0; i < orderedIssueIds.length; i++) {
+      await Issue.updateOne(
+        { _id: orderedIssueIds[i], board_id, status },
+        { position: i + 1 },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return { success: true };
+
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    throw err;
+  }
+}
+
 
 async function importIssue(issueData, addedData ) {
   if(!Array.isArray(issueData) || issueData.length === 0){
@@ -198,7 +434,11 @@ async function deleteIssue({ _id }) {
 module.exports = {
   createIssue,
   searchIssues,
-  updateIssue,
+  getEpics,
+  updateIssueMetadata,
+  transitionIssueStatus,
+  moveIssue,
+  reorderColumn,
   importIssue,
   deleteIssue
 };

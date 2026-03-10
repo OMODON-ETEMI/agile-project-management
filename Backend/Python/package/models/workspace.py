@@ -3,6 +3,7 @@ import json
 from typing import Optional, Dict
 from bson import json_util, ObjectId
 from package.config.slug import slugify
+from package.config.utility import serialize_document
 from package import db
 from dotenv import load_dotenv
 import os
@@ -53,92 +54,88 @@ class Workspace:
 
         new_Workspace = db.Workspace.find_one({'_id' : result.inserted_id})
         if new_Workspace:
-            Workspace_data = json.loads(json_util.dumps(new_Workspace))
-            response_data = {
-                'message': f'Your {new_Workspace['title']} workspace has been created',
-                'Workspace': Workspace_data,
-                }
-            response = jsonify(response_data)
-            response.status_code = 201
-            return response
+            return serialize_document(new_Workspace)
         else :
-            return Response(json.dumps({'message' : 'failed to create account'}), mimetype='application,json'), 500
+            return None
         
-
     @staticmethod    
-    def search(title = None, organisation_id = None, workspace_id = None, slug = None):
+    def search(title=None, organisation_id=None, workspace_id=None, slug=None, user_id=None):
+        authorized_workspace_ids = []
+        if user_id:
+            user_workspaces = db.User_Workspace.find({'user_id': ObjectId(user_id)})
+            authorized_workspace_ids = [w['workspace_id'] for w in user_workspaces]
+
+        # CASE A: SEARCH BY WORKSPACE_ID (Specific Resource)
         if workspace_id:
-            Workspace = db.Workspace.find_one({'_id' : ObjectId(workspace_id)})
-            if Workspace:
-                Workspace_data = json.loads(json_util.dumps(Workspace))
-                return jsonify(Workspace_data), 200
-            else:
-                return jsonify({'error': 'Workspace not found'}), 404
-        elif title:
-            Workspaces = db.Workspace.find({'title' : {'$regex' : f'.*{title}*.', '$options' : 'i'}})
-            if Workspaces is None:
-                return jsonify({'error': 'No workspaces found with that title'}), 404
-            Workspace_list = [json.loads(json_util.dumps(Workspace)) for Workspace in Workspaces]
-            return jsonify(Workspace_list), 200
-        elif organisation_id: 
-            Workspaces = db.Workspace.aggregate([
-                        {
-                            "$match": { "organisation_id": ObjectId(organisation_id) }  # Filter workspaces by organisation_id
-                        },
-                        {
-                            "$lookup": {
-                                "from": "User_Workspace",  # Join with user_workspace collection
-                                "localField": "_id",
-                                "foreignField": "workspace_id",
-                                "as": "members"
-                            }
-                        },
-                        {
-                            "$addFields": {
-                                "members_count": { "$size": "$members" }  # Count the number of members
-                            }
-                        },
-                        {
-                            "$project": {
-                                "members": 0  # Optional: Exclude the 'members' array
-                            }
-                        }
-                    ])
-            if not Workspaces:
-                return jsonify({'error': 'No workspaces found for this organisation'}), 404
-            Workspace_list = [{**json.loads(json_util.dumps(ws)), 
-                               "_id": str(ws["_id"]),
-                               "created_By": str(ws["created_By"]),
-                               "organisation_id": str(ws["organisation_id"])} for ws in Workspaces]
-            return jsonify(Workspace_list), 200
-        elif slug:
-            workspace = db.Workspace.find_one({ "slug": slug })
+            if not ObjectId.is_valid(workspace_id): return None
+            ws_oid = ObjectId(workspace_id)
+            # Auth Check: Only return if the user is a member
+            if user_id and ws_oid not in authorized_workspace_ids:
+                return None
+                
+            workspace = db.Workspace.find_one({'_id': ws_oid})
             if workspace:
-                Workspace_data = {**json.loads(json_util.dumps(workspace)), 
-                                  "_id": str(workspace["_id"]),
-                                  "created_By": str(workspace["created_By"]),
-                                  "organisation_id": str(workspace["organisation_id"])}
-                return jsonify(Workspace_data), 200
-            else:
-                return jsonify({'error': 'Workspace not found'}), 404
+                return serialize_document(workspace)
+            return None
+
+        # CASE B: SEARCH BY SLUG (Specific Resource)
+        elif slug:
+            workspace = db.Workspace.find_one({"slug": slug})
+            if workspace and (not user_id or workspace['_id'] in authorized_workspace_ids):
+                return serialize_document(workspace)
+            return None
+
+        # CASE C: SEARCH BY TITLE (Discovery)
+        elif title:
+            query = {
+                'title': {'$regex': f'.*{title}.*', '$options': 'i'},
+            }
+            if user_id:
+                query['_id'] = {'$in': authorized_workspace_ids}
+            workspaces = db.Workspace.find(query)
+            return serialize_document(list(workspaces))
+
+        # CASE D: SEARCH BY ORGANISATION (Discovery)
+        elif organisation_id:
+            match_query = { "organisation_id": ObjectId(organisation_id) }
+            if user_id:
+                match_query["_id"] = {"$in": authorized_workspace_ids}
+            pipeline = [
+                {"$match": match_query},
+                {"$lookup": {
+                    "from": "User_Workspace",
+                    "localField": "_id",
+                    "foreignField": "workspace_id",
+                    "as": "members"
+                }},
+                {"$addFields": {"members_count": {"$size": "$members"}}},
+                {"$project": {"members": 0}}
+            ]
+            workspaces = db.Workspace.aggregate(pipeline)
+            return serialize_document(list(workspaces))
+
+        return [] # Default fallback
     
     @staticmethod
     def Update(Workspace_id: str, user_id: str,title: Optional[str] = None, image : Optional[Dict] = None):
         # Do NOTE: That there is more we can do here such as updating the user_id we can even remove the add access user and revoke access and add it to this function
         try:
             update_fields = {}
+            if not any([title, image]):
+                data = db.Workspace.find_one({'_id' : ObjectId(Workspace_id)})
+                return serialize_document(data)
             if title is not None:
                 if isinstance(title, str) and title.strip():
                     update_fields['title'] = title.strip()
                 else: 
-                    return jsonify({'error' : 'Invalid title'}), 400
+                    return None
             if image is not None:
                 if isinstance(image, dict):
                     update_fields['image'] = image
                 else:
-                    return jsonify({'error': 'invalid image Data'}), 400
+                    return None
             
-            result = db.Workspace.update_one({'_id': ObjectId(Workspace_id)}, {
+            db.Workspace.update_one({'_id': ObjectId(Workspace_id)}, {
                 "$set" : update_fields, 
                 '$push': { 'history': {
                                 'updated_at': datetime.now(timezone.utc),
@@ -146,27 +143,18 @@ class Workspace:
                                 'changes': update_fields
                             }
                         }})
-            if result.modified_count > 0:
-                data = db.Workspace.find_one({'_id' : ObjectId(Workspace_id)})
-                Workspace = json.loads(json_util.dumps(data))
-                return jsonify(
-                    {"message" : "Workspace updated succesfully",
-                     'data' : Workspace, }), 200
-            else: 
-                return jsonify({"message" : " No changes were made to the Workspace"}), 200
+            data = db.Workspace.find_one({'_id' : ObjectId(Workspace_id)})
+            return serialize_document(data)
         except Exception as e:
-            return jsonify({'error' : str(e)}),500
+            return None
     @staticmethod
     def delete(Workspace_id,user_id):
         result = db.Workspace.delete_one({'_id': ObjectId(Workspace_id), 'created_By' : ObjectId(user_id)})
         if result.deleted_count == 1 :
-            message = {'message' : f'Deleted Successfully' }
             projectcollection = db.get_collection('proojects')
             taskcollection = db.get_collection('tasks')
             projectcollection.delete_many({'assigned_Workspace': ObjectId(Workspace_id)})
             taskcollection.delete_many({'assigned_Workspace': ObjectId(Workspace_id)})
-            return message, 200
-        else : 
-            message = {'message' : f'Failed to Delete'}
-            return message, 400
+            return True
+        return False
         

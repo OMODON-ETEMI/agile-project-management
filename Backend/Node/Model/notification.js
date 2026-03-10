@@ -61,13 +61,11 @@ const NotificationSchema = new mongoose.Schema(
     actionUrl: { type: String },
 
     // Delivery control
-    deliveryMediums: [
-      {
-        type: String,
-        enum: ["in_app", "email", "push"],
-        default: "in_app",
-      },
-    ],
+    deliveryMediums: {
+      type: [String],
+      enum: ["in_app", "email", "push"],
+      default: ["in_app"]
+    },
 
     priority: {
       type: String,
@@ -81,13 +79,10 @@ const NotificationSchema = new mongoose.Schema(
 
     groupKey: { type: String, index: true },
 
-    deliveryStatus: {
-      type: String,
-      enum: ["pending", "delivered", "failed"],
-      default: "delivered",
-    },
   },
-  { timestamps: true }
+  { timestamps: true,
+    bufferCommands: false
+   }
 );
 
 // Index for fast notification feed scroll
@@ -138,7 +133,6 @@ NotificationSchema.pre("validate", function (next) {
       this.deletedBy = this.deletedBy.map(toObjectId);
     }
 
-    console.log("Pre-validation completed for notification:", this.actor.userId, this.recipientId, this.message);
     next();
   } catch (err) {
     next(err);

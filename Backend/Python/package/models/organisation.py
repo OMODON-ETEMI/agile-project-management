@@ -60,24 +60,21 @@ class Organisation:
 
         new_organisation = db.organisation.find_one({'_id' : result.inserted_id})
         if new_organisation:
-            organisation_data = serialize_document(new_organisation)
-            response_data = {
-                'message': f'Your {new_organisation['title']} Organisation has been created',
-                'organisation': organisation_data,
-                }
-            response = jsonify(response_data)
-            response.status_code = 200
-            return response
+            return serialize_document(new_organisation)
         else :
-            return Response(json.dumps({'message' : 'failed to create account'}), mimetype='application,json'), 500
+            return None
         
 
     @staticmethod    
-    def search(title: Optional[str] = None, organisation_id = None, slug: Optional[str] = None):
+    def search(title: Optional[str] = None, organisation_id = None, slug: Optional[str] = None, user_id = None):
         if title:
-            organisations = db.organisation.find({'title': {'$regex': f'.*{title}.*', '$options': 'i'}})
-            organisation_list = [json.loads(json_util.dumps(organisation)) for organisation in organisations]
-            return organisation_list
+            query = {'title': {'$regex': f'.*{title}.*', '$options': 'i'}}
+            if user_id:
+                user_orgs = db.User_Organisation.find({'user_id': ObjectId(user_id)})
+                org_ids = [org['organisation_id'] for org in user_orgs]
+                query['_id'] = {'$in': org_ids}
+            organisations = list(db.organisation.find(query))
+            return serialize_document(organisations)
         elif organisation_id or slug:
             conditions = []
             if organisation_id:
@@ -116,16 +113,20 @@ class Organisation:
             ]) 
 
             organisation = next(organisations, None)  # Get the first document or None if empty
+            
+            if organisation and user_id:
+                is_member = db.User_Organisation.find_one({'user_id': ObjectId(user_id), 'organisation_id': organisation['_id']})
+                if not is_member:
+                    return {
+                        "success": False,
+                        "message": "Organisation not found"
+                    }
+            
             if organisation:
-                return {
-                    "success": True,
-                    "data" : {**json.loads(json_util.dumps(organisation)), "_id": str(organisation["_id"])}
-                }
+                return serialize_document(organisation)
             else:
-                return {
-                    "success": False,
-                    "message": "Organisation not found"
-                }, 404
+                print("Organisation not found for ID or Slug:", organisation_id, slug)  # Debug statement for not found case
+                return None
 
     @staticmethod
     def get_User_role(organisation_id):
@@ -153,51 +154,52 @@ class Organisation:
             organisation_id = organisation.get('_id')
             user_role = PermissionService.get_user_permissions(user_id, organisation_id) 
             workspace_count = db.Workspace.count_documents({'organisation_id': organisation_id})
-            organisation['_id'] = str(organisation['_id'])
             recent_document = Organisation.get_last_Accessed(document=last_accessed_document, org_slug=organisation.get('slug'))
-            organisation_data = json.loads(json_util.dumps(organisation))
+            organisation_data = serialize_document(organisation)
             organisation_data['workspace_count'] = workspace_count
             organisation_data['User_role'] = user_role
             organisation_data['lastAccessed'] = recent_document
             organisations_list.append(organisation_data)
-        response = jsonify(organisations_list) 
-        response.status_code=200
-        return  response
+        return serialize_document(organisations_list)
     
     @staticmethod
     def Update(organisation_id: str, user_id: str, title: Optional[str] = None, image : Optional[Dict] = None, description: Optional[str] = None, slug: Optional[str] = None, color: Optional[str] = None):
         # Do NOTE: That there is more we can do here such as updating the user_id we can even remove the add access user and revoke access and add it to this function
         try:
             update_fields = {}
+            if not any([title, image, description, slug, color]):
+                data = db.organisation.find_one({'_id' : ObjectId(organisation_id)})
+                return serialize_document(data)
+
             if slug is not None:
                 if isinstance(slug, str) and slug.strip():
                     if db.organisation.find_one({'slug': slug.strip(), '_id': {'$ne': ObjectId(organisation_id)}}):
-                        return jsonify({'error': 'Slug already in use'}), 400
+                        return None
                     update_fields['slug'] = slug.strip()
                 else:
-                    return jsonify({'error': 'Invalid slug'}), 400
+                    return None
             if color is not None:
                 if isinstance(color, str) and color.strip():
                     update_fields['color'] = color.strip()
                 else:
-                    return jsonify({'error': 'Invalid color'}), 400
+                    return None
             if description is not None:
                 if isinstance(description, str):
                     update_fields['description'] = description
                 else:
-                    return jsonify({'error': 'Invalid description'}), 400
+                    return None
             if title is not None:
                 if isinstance(title, str) and title.strip():
                     update_fields['title'] = title.strip()
                 else: 
-                    return jsonify({'error' : 'Invalid title'}), 400
+                    return None
             if image is not None:
                 if isinstance(image, dict):
                     update_fields['image'] = image
                 else:
-                    return jsonify({'error': 'invalid image Data'}), 400
+                    return None
             
-            result = db.organisation.update_one({'_id': ObjectId(organisation_id)}, {
+            db.organisation.update_one({'_id': ObjectId(organisation_id)}, {
                 "$set" : update_fields,
                 '$push': { 'history': {
                                 'updated_at': datetime.now(timezone.utc),
@@ -205,16 +207,10 @@ class Organisation:
                                 'changes': update_fields
                             }
                         }})
-            if result.modified_count > 0:
-                data = db.organisation.find_one({'_id' : ObjectId(organisation_id)})
-                organisation = json.loads(json_util.dumps(data))
-                return jsonify(
-                    {"message" : "organisation updated succesfully",
-                     'data' : organisation, }), 200
-            else: 
-                return jsonify({"message" : " No changes were made to the organisation"}), 200
+            data = db.organisation.find_one({'_id' : ObjectId(organisation_id)})
+            return serialize_document(data)
         except Exception as e:
-            return jsonify({'error' : str(e)}),500
+            return None
     @staticmethod
     def delete(organisation_id,user_id):
         print('trying to delete organisation')
@@ -238,9 +234,7 @@ class Organisation:
         organisation_result = db.organisation.delete_one({'_id': ObjectId(organisation_id), 'created_By' : ObjectId(user_id)})
         if organisation_result.deleted_count == 1 :   
             PermissionService.remove_user_from_organization(user_id, organisation_id)
-            message = {'message' : f'Deleted Successfully' }
-            return message, 200
+            return True
         else : 
             print("Failed to delete organisation.")
-            message = {'message' : f'Failed to Delete'}
-            return message, 400
+            return False

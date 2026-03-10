@@ -1,5 +1,4 @@
 const jwt = require ("jsonwebtoken");
-const cookieParser = require("cookie-parser");
 
 function authMiddleware(req, res, next) {
   if(!req.headers.authorization){
@@ -15,7 +14,7 @@ function authMiddleware(req, res, next) {
       algorithms: [process.env.JWT_ALGORITHM],
     });
     
-    req.user = payload; // contains user_id, org_id, role, permissions…
+    req.user = payload;
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid token" });

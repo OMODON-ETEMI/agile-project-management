@@ -5,7 +5,11 @@ const upload = require("../utility/multer");
 const {
   createIssue,
   searchIssues,
-  updateIssue,
+  getEpics,
+  updateIssueMetadata,
+  transitionIssueStatus,
+  moveIssue,
+  reorderColumn,
   importIssue,
   deleteIssue,
 } = require("../Controller/issueController");
@@ -22,7 +26,7 @@ const {
   getNotifications,
   unreadCountOnly,
   markNotificationsAsRead,
-  deleteNotifications,
+  softDeleteNotification,
 } = require("../Controller/notificationController");
 
 
@@ -53,69 +57,149 @@ issueRouter.post("/issue/create", async (req, res) => {
 issueRouter.post("/issue/search", async (req, res) => {
   try {
     const queryParams = {
-      ...req.body,
       ...req.query,
+      ...req.body,
     };
 
-    if (Object.keys(queryParams).length === 0) {
+    if (!queryParams) {
       return res.status(400).json({
-        message: "Missing search parameters",
+        message: "search data is required",
       });
     }
 
-    if (!Object.keys(queryParams).includes("workspace_id")) {
-      return res.status(400).json({
-        message: "Invalid search parameters",
-      });
-    }
+    // OPTIONAL: enforce user access to workspace here
+    // await validateWorkspaceAccess(req.user.user_id, queryParams.workspace_id)
 
-    const issues = await searchIssues(queryParams);
+    const result = await searchIssues(queryParams);
 
-    if (issues.length === 0) {
-      return res.status(404).json({
-        message: "No issues found",
-      });
-    }
-
-    res.status(200).json({
+    return res.status(200).json({
       message: "Issues retrieved successfully",
-      count: issues.length,
-      data: issues,
+      data: result.data,
+      pagination: result.pagination,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       message: "Error searching issues",
       error: error.message,
     });
   }
 });
 
-issueRouter.patch(
-  "/issue/update",
-  validateObjectId(["_id", "creator"]),
-  async (req, res) => {
-    try {
-      const updatedIssue = await updateIssue(req.body);
+issueRouter.get("/issue/epics/:workspace_id", async (req, res) => {
+  try {
+    const { workspace_id } = req.params;
 
-      if (!updatedIssue) {
-        return res.status(404).json({
-          message: "Issue not found or no updates applied",
-        });
-      }
-
-      emitSocketEvent("Project Updated", updatedIssue);
-      res.status(200).json({
-        message: "Issue updated successfully",
-        data: updatedIssue,
-      });
-    } catch (error) {
-      res.status(500).json({
-        message: "Error updating issue",
-        error: error.message,
+    if (!workspace_id) {
+      return res.status(400).json({
+        message: "workspace_id is required",
       });
     }
+
+    const epics = await getEpics(workspace_id);
+
+    return res.status(200).json({
+      message: "Epics retrieved successfully",
+      count: epics.length,
+      data: epics,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error retrieving epics",
+      error: error.message,
+    });
   }
-);
+});
+
+issueRouter.get("/issue/backlog/:workspace_id/:board_id", async (req, res) => {
+  try {
+    const { workspace_id, board_id } = req.params;
+
+    const result = await searchIssues({
+      workspace_id,
+      board_id,
+      includeEpics: false,
+      status: ["Backlog"],
+    });
+
+    return res.status(200).json({
+      message: "Backlog issues retrieved",
+      data: result.data,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error retrieving backlog",
+      error: error.message,
+    });
+  }
+});
+
+issueRouter.get("/issue/board/:workspace_id/:board_id", async (req, res) => {
+  try {
+    const { workspace_id, board_id } = req.params;
+
+    const result = await searchIssues({
+      workspace_id,
+      board_id,
+      unresolvedOnly: true,
+    });
+
+    return res.status(200).json({
+      message: "Board issues retrieved",
+      data: result.data,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error retrieving board issues",
+      error: error.message,
+    });
+  }
+});
+
+issueRouter.patch("/issue/update-metadata", async (req, res) => {
+  try {
+    const issue = await updateIssueMetadata(
+      { issueId: req.body.issueId, updates: req.body.updates },
+      req.user.user_id
+    );
+
+    res.status(200).json({ message: "Issue updated", data: issue });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+issueRouter.post("/issue/transition", async (req, res) => {
+  try {
+    const issue = await transitionIssueStatus(
+      { issueId: req.body.issueId, status: req.body.status },
+      req.user.user_id
+    );
+
+    res.status(200).json({ message: "Status updated", data: issue });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+issueRouter.post("/issue/move", async (req, res) => {
+  try {
+    const issue = await moveIssue(req.body, req.user.user_id);
+    res.status(200).json({ message: "Issue moved", data: issue });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+issueRouter.post("/issue/reorder", async (req, res) => {
+  try {
+    const result = await reorderColumn(req.body, req.user.user_id);
+    res.status(200).json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});                                                                                                                                                                                                     
 
 issueRouter.get("/issue/burndown", validateObjectId(['sprintID']), async (req, res) => {
     try {
@@ -340,9 +424,7 @@ projectRouter.patch(
       const updatedProject = await updateProject(req.body);
 
       if (!updatedProject) {
-        return res.status(404).json({
-          message: "Project not found or no updates applied",
-        });
+        return res.status(404).json({  message: "Project not found or no updates applied" });
       }
 
       res.status(200).json({
@@ -358,19 +440,12 @@ projectRouter.patch(
   }
 );
 
-projectRouter.delete(
-  "/project/delete",
-  validateObjectId(["_id", "board_id"]),
-  async (req, res) => {
+projectRouter.delete( "/project/delete", validateObjectId(["_id", "board_id"]), async (req, res) => {
     try {
       const deletedProject = await deleteProject(req.body);
-
       if (!deletedProject) {
-        return res.status(404).json({
-          message: "Project not found",
-        });
-      }
-
+        return res.status(404).json({ message: "Project not found" });
+       }
       res.status(200).json({
         message: "Project deleted successfully",
         data: deletedProject,
@@ -386,12 +461,12 @@ projectRouter.delete(
 
 // Notification Routes
 notificationRouter.post("/notification/create", async (req, res) => {
-  const result = await createNotification(req.body);
+  await createNotification(req.body);
   res.status(201).json({ message: "Notification creation initiated" });
 });
 
 notificationRouter.get('/notification', async (req, res) => {
-  const notifications = await getNotifications(req.query);
+  const notifications = await getNotifications(req.user.user_id, req.query);
   console.log("Notifications retrieved:", notifications);
   res.status(200).json({ message: "Notification retrieval initiated", data: notifications });
 });
@@ -403,22 +478,25 @@ notificationRouter.get('/notification/unreadCount', async (req, res) => {
 
 notificationRouter.patch('/notification/:notificationId/read', async (req, res) => {
   const notificationId = req.params.notificationId;
-  await markNotificationsAsRead(req.body);
+  await markNotificationsAsRead(req.user.user_id, [notificationId]);
   res.status(200).json({ message: "Mark as read initiated" });
 }); 
 
 notificationRouter.patch('/notification/markAsRead', async (req, res) => {
-  await markNotificationsAsRead(req.body);
+  const userId = req.user.user_id;
+  console.log("User ID for marking all as read:", userId);
+  await markNotificationsAsRead(userId, req.body);
   res.status(200).json({ message: "Mark as read initiated" });
 });
 
-notificationRouter.delete('/notification/:id', async (req, res) => {
-  await deleteNotifications(req.body);
+notificationRouter.delete('/notification/clearRead', async (req, res) => {
+  const { ids } = req.body;
+  await softDeleteNotification(req.user.user_id, ids);
   res.status(200).json({ message: "Notification deletion initiated" });
 });
 
 notificationRouter.delete('/notification/clearAll', async (req, res) => {
-  await deleteNotifications({ notificationIds: 'all', recipientId: req.body.recipientId });
+  await softDeleteNotification(req.user.user_id, []);
   res.status(200).json({ message: "All notifications deletion initiated" });
 });
 

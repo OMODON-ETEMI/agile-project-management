@@ -5,9 +5,9 @@ function initSocket(socketServer) {
   console.log('Socket.IO initialized');
 }
 
-function emitSocketEvent(eventName, data) {
+function emitSocketEvent(eventName, data, id) {
   if (io) {
-    io.emit(eventName, data);
+    io.to(id.toString()).emit(eventName, data);
   } else {
     console.warn('Socket.io not initialized');
   }

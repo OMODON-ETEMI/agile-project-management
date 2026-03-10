@@ -1,6 +1,7 @@
 # ====================== UTILITY FUNCTION =================== #
 from flask import request, jsonify, g
 from bson import ObjectId
+from datetime import datetime
 import jwt
 from functools import wraps
 from package.config.security import SecurityConfig
@@ -32,10 +33,16 @@ def serialize_document(document):
     if isinstance(document, list):
         return [serialize_document(doc) for doc in document]
     if isinstance(document, dict):
-        for key, value in document.items():
-            if isinstance(value, ObjectId):
-                document[key] = str(value)
-        return document
+        return {key: serialize_document(value) for key, value in document.items()}
+
+    # 3. Handle ObjectIds (Convert to string)
+    if isinstance(document, ObjectId):
+        return str(document)
+    
+    # 4. Handle Datetimes (Convert to ISO string for JSON compatibility)
+    if isinstance(document, datetime):
+        return document.isoformat()
+    return document
 
 def auth_reqired(f):
     @wraps(f)
@@ -72,16 +79,18 @@ def require_organization_permission(permission):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             current_user_id = g.user_id
-            org_id = kwargs.get('org_id') or request.get_json().get('org_id')
+            org_id = kwargs.get('org_id') or request.get_json().get('org_id') or request.get_json().get('organisation_id')
+            org_slug = kwargs.get('slug') or request.get_json().get('slug')
             
-            if not org_id:
-                return jsonify({'error': 'Organization ID required'}), 400
+            if not org_id and not org_slug:
+                return jsonify({'error': 'Organization ID or slug required'}), 400
             
             # Check permission
             has_perm = PermissionService.has_organization_permission(
                 current_user_id,
                 org_id,
-                permission
+                permission,
+                org_slug
             )
             
             if not has_perm:
@@ -104,17 +113,20 @@ def require_workspace_permission(permission):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             current_user_id = g.user_id
-            workspace_id = kwargs.get('workspace_id')
+            workspace_id = kwargs.get('workspace_id') or request.get_json().get('workspace_id') 
+            workspace_slug = kwargs.get('slug') or request.get_json().get('slug')
             
-            if not workspace_id:
-                return jsonify({'error': 'Workspace ID required'}), 400
+            if not workspace_id and not workspace_slug:
+                return jsonify({'error': 'Workspace ID or slug required'}), 400
             
             # Check permission
             has_perm = PermissionService.has_workspace_permission(
                 current_user_id,
                 workspace_id,
-                permission
+                permission,
+                workspace_slug
             )
+            print(f"User {current_user_id} permission check for workspace {workspace_id or workspace_slug} and permission {permission}: {has_perm}")  
             
             if not has_perm:
                 return jsonify({
@@ -125,6 +137,35 @@ def require_workspace_permission(permission):
             
             return f(*args, **kwargs)
         return decorated_function
+    return decorator
+
+def require_either_permission(org_perm: str, ws_perm: str):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            errors = []
+            
+            # 1. Try Org Permission
+            try:
+                # We simulate calling the logic of your first decorator
+                require_organization_permission(org_perm)(func)(*args, **kwargs)
+                return func(*args, **kwargs)
+            except Exception as e:
+                errors.append(e)
+
+            # 2. Try Workspace Permission
+            try:
+                require_workspace_permission(ws_perm)(func)(*args, **kwargs)
+                return func(*args, **kwargs)
+            except Exception as e:
+                errors.append(e)
+
+            # 3. If we reached here, both failed
+            return jsonify({
+                "error": f"Missing required permissions: {org_perm} or {ws_perm}",
+                "status_code": 403
+            }), 403
+        return wrapper
     return decorator
 
 def admin_only():

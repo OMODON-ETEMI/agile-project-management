@@ -56,10 +56,10 @@ class User_Workspace:
     def create_User_Workspace(self):
         workspace = db.Workspace.find_one({"_id": self.workspace_id})
         if not workspace:
-            return Response(json.dumps({'message' : f"Workspace with ID {self.workspace_id} not found."}), mimetype='application/json',status=404)
+            return False
         organisation_id = workspace['organisation_id']
         if not organisation_id:
-            return Response(json.dumps({'message' : "Missing 'organisation_id' in workspace data."}), mimetype='application/json',status=404)
+            return False
         result = db.User_Workspace.insert_one({
             'user_id' : self.user_id,
             'workspace_id' : self.workspace_id,
@@ -68,26 +68,19 @@ class User_Workspace:
             'joined_at': self.joined_at
         })
 
-        if result.acknowledged:
-            return Response(json.dumps({'message': 'User invited to workspace successfully'}), mimetype='application/json'), 201
-        else :
-            return Response(json.dumps({'message' : 'failed to invite User'}), mimetype='application,json'), 500
+        return result.acknowledged
 
 
     def revoke_User_Workspace(self):
         result = db.User_Workspace.find_one_and_delete({'workspace_id': self.workspace_id, 'user_id': self.user_id})
-        if result:
-            return Response(json.dumps({'message' : 'User has been removed from this Workspace'}), mimetype='application/json'), 200
-        else :
-            return Response(json.dumps({'message' : 'failed to remove user from this Workspace'}), mimetype='application/json'), 500
+        return bool(result)
         
 
 
     def Users_in_Workspace(workspace_id):
         user_ids = [user['user_id'] for user in db.User_Workspace.find({'workspace_id': ObjectId(workspace_id)}, {'user_id': 1, '_id': 0  })]
-        users = db.Users.find({'_id': {'$in' : user_ids}})
-        user_data = [{**json.loads(json_util.dumps(users)), "_id" : str(users['_id'])} for users in users]
-        return Response(json.dumps(user_data), mimetype='application,json'), 200
+        users = db.Users.find({'_id': {'$in' : user_ids}}, {'password': 0, 'createdAt': 0, 'updatedAt': 0})
+        return serialize_document(list(users))
     
     
 class User_Organisation: 
@@ -134,7 +127,12 @@ class User_Organisation:
         
 
 
-    def Users_in_Organisation(Organisation_id):
+    def Users_in_Organisation(Organisation_id, user_id=None):
+        if user_id:
+            is_member = db.User_Organisation.find_one({'user_id': ObjectId(user_id), 'organisation_id': ObjectId(Organisation_id)})
+            if not is_member:
+                return {"total": 0, "results": []}
+
         users = db.User_Organisation.aggregate([
             {
                 '$match' : {'organisation_id':ObjectId( Organisation_id)}},
@@ -192,7 +190,7 @@ class User_Organisation:
                 }}
         ])
         if users:
-            user_data = [{**json.loads(json_util.dumps(user)), "user_id" : str(user['user_id'])} for user in users]
+            user_data = serialize_document(list(users))
             total = len(user_data)
             return {
                 "total": total,
@@ -286,7 +284,7 @@ class User_Organisation:
                 print("Aggregation error:", e)
                 return {"total": 0, "results": []}
             
-        results = [{**u, "user_id": str(u["user_id"])} for u in users]
+        results = serialize_document(users)
         return {
             "total": len(results),
             "page": page,
@@ -390,7 +388,7 @@ class User_Activity:
                 {"$sort": {"count": -1}},
                 {"$limit": limit}
             ]
-            return list(self.collection.aggregate(pipeline))
+            return serialize_document(list(self.collection.aggregate(pipeline)))
 
         def get_last_accessed_entities(user_id, entity_type, limit):
             """Fetches the last accessed entities by the user."""
@@ -401,12 +399,28 @@ class User_Activity:
                     "_id": "$entity_id",
                     "timestamp": {"$first" : "$timestamp"}
                 }},
-                {"$project": {
-                    "title": "$_id",
-                    "timestamp": "$timestamp",
-                    "_id": 0
+                {"$lookup": {
+                    "from": entity_type,
+                    "let": { "search_id": "$_id" }, # This is the ID from your 'Recent' list
+                    "pipeline": [
+                        { "$match": {
+                            "$expr": {
+                                "$or": [
+                                    { "$eq": ["$slug", "$$search_id"] },
+                                    { "$eq": ["$_id", "$$search_id"] }
+                                ]
+                            }
+                        }}
+                    ],
+                    "as": "data"
                 }},
+                {"$unwind": { "path": "$data", "preserveNullAndEmptyArrays": True }},
                 {"$limit": limit},
+                {
+                    # This specifically merges the timestamp INTO the workspace document
+                    "$replaceRoot": { 
+                        "newRoot": { "$mergeObjects": ["$data", { "lastAccessed": "$timestamp" }] } 
+                    }}
             ]
             data = list(db.User_Activity.aggregate(pipeline))
             return serialize_document(data)
@@ -425,4 +439,3 @@ class User_Activity:
                 oldest_ids = [log["_id"] for log in oldest_logs]
                 self.collection.delete_many({"_id": {"$in": oldest_ids}})
         
-

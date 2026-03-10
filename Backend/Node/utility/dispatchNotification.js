@@ -21,7 +21,9 @@ async function dispatchNotification(notificationDoc) {
     actor,
     context,
     actionUrl,
-    deliveryMediums = ["push", "inApp"], // default if not explicitly set
+    readBy,
+    deletedBy,
+    deliveryMediums = ["in_app"]
   } = notificationDoc;
 
   if (!Array.isArray(recipientId) || recipientId.length === 0) {
@@ -33,12 +35,14 @@ async function dispatchNotification(notificationDoc) {
   const dispatchPromises = recipientId.map(async (userId) => {
     for (const medium of deliveryMediums) {
       switch (medium) {
-        case "push":
-        case "inApp": {
+        case "push":{
+          // Both use socket
+          console.log(`push medium detected for ${userId}, but sending is disabled.`);
+          break;
+        }
+        case "in_app": {
           // Both use socket
           emitSocketEvent("notification:new", {
-            userId,
-            notification: {
               id: notificationDoc._id,
               type,
               title,
@@ -46,24 +50,16 @@ async function dispatchNotification(notificationDoc) {
               actor,
               context,
               actionUrl,
+              readBy,
+              deletedBy,
               createdAt: notificationDoc.createdAt,
-            },
-            medium,
-          });
+          }, userId);
           break;
         }
 
         case "email": {
-          // await sendEmailNotification({
-          //   toUserId: userId,
-          //   subject: title || "New Notification",
-          //   messageBody: message,
-          //   actor,
-          //   entity,
-          //   type,
-          //   actionUrl,
-          // });
-          // break;
+          console.log(`Email medium detected for ${userId}, but sending is disabled.`);
+          break;
         }
 
         default:

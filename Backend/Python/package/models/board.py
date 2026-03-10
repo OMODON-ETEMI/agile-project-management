@@ -2,6 +2,7 @@ from flask import Response,jsonify
 import json
 from datetime import datetime , timezone
 from bson import json_util, ObjectId
+from package.config.utility import serialize_document
 from package import db
 from dotenv import load_dotenv
 import os
@@ -26,9 +27,9 @@ class Board:
     def create_board(self):
         if self.type == 'sprint':
             if not self.startDate or not self.endDate:
-                return Response(json.dumps({'message': 'Start date and end date are required for sprint boards'}), mimetype='application/json'), 400
+                return None
             if self.startDate >= self.endDate:
-                return Response(json.dumps({'message': 'Start date must be before end date'}), mimetype='application/json'), 400
+                return None
         result = db.Board.insert_one({
             'title' : self.title,
             'type' : self.type,
@@ -44,16 +45,9 @@ class Board:
 
         new_board = db.Board.find_one({'_id' : result.inserted_id})
         if new_board:
-            board_data = json.loads(json_util.dumps(new_board))
-            response_data = {
-                'message': f'Your {new_board['title']} Board has been created',
-                'board': board_data,
-                }
-            response = jsonify(response_data)
-            response.status_code = 200
-            return response
+            return serialize_document(new_board)
         else :
-            return Response(json.dumps({'message' : 'failed to create account'}), mimetype='application,json'), 500
+            return None
         
     @staticmethod    
     def grant_access_to_board(board_id, user_id):
@@ -85,37 +79,57 @@ class Board:
     @staticmethod    
     def search(title):
         boards = db.Board.find({'title' : {'$regex' : f'.*{title}*.', '$options' : 'i'}})
-        data = [json.loads(json_util.dumps(board)) for board in boards]
-        return jsonify(data), 200
+        boards_list = list(boards)
+        if not boards_list:
+            return None
+        return serialize_document(boards_list)
     
     @staticmethod
     def board_ID(ID):
-        boards = db.Board.find_one({"_id": ObjectId(ID)})
-        if not boards:
-            return {"error": "Board not found"}
-        else :
-            access_users = boards.get('access_users', [])
-            user_ids = []
-            for user in access_users:
-                user_ids.append({
-                    "user_id": user["user_id"],
-                    "joined_at": user["joined_at"]
-                })
-            return user_ids
+        try:
+            if not ObjectId.is_valid(ID):
+                return None
+            boards = db.Board.find_one({"_id": ObjectId(ID)})
+            return serialize_document(boards)
+        except Exception as e:
+            return None
         
     @staticmethod
     def board():
         boards = db.Board.find()
-        boards_list = [json.loads(json_util.dumps(board)) for board in boards]
-        return jsonify(boards_list), 200
+        return serialize_document(list(boards))
     
     @staticmethod
-    def board_in_workspace(workspace_id):
-        boards = db.Board.find({'workspace': ObjectId(workspace_id)})
-        board_data = [{**json.loads(json_util.dumps(board)), 
-                       "issues": json.loads(json_util.dumps(db.issues.find({"board_id": board["_id"]}))),
-                       "_id": str(board["_id"])} for board in boards]
-        return jsonify(board_data), 200
+    def board_in_workspace(workspace_identifier, user_id=None):
+        # Accept either a workspace ObjectId string or a workspace slug
+        try:
+            if ObjectId.is_valid(workspace_identifier):
+                workspace_obj_id = ObjectId(workspace_identifier)
+            else:
+                workspace = db.Workspace.find_one({'slug': workspace_identifier})
+                if not workspace:
+                    return None
+                workspace_obj_id = workspace['_id']
+
+            if user_id:
+                is_member = db.User_Workspace.find_one({'user_id': ObjectId(user_id), 'workspace_id': workspace_obj_id})
+                if not is_member:
+                    return None
+
+            boards = db.Board.find({'workspace': workspace_obj_id})
+            board_data = []
+            for board in boards:
+                board_json = serialize_document(board)
+                issues_cursor = db.Issues.find({'board_id': board['_id']})
+                issues = serialize_document(list(issues_cursor))
+                board_json['issues'] = issues
+                board_data.append(board_json)
+
+            if not board_data:
+                return []
+            return board_data
+        except Exception as e:
+            return None
     
     @staticmethod
     def Update(
@@ -132,7 +146,7 @@ class Board:
             # First check if board exists
             existing_board = db.Board.find_one({'_id': ObjectId(board_id)})
             if not existing_board:
-                return jsonify({'error': 'Board not found'}), 404
+                return None
 
             update_fields = {}
             validation_errors = []
@@ -203,14 +217,11 @@ class Board:
 
             # Check for validation errors
             if validation_errors:
-                return jsonify({
-                    'error': 'Validation failed',
-                    'validation_errors': validation_errors
-                }), 400
+                return None
 
             # Perform update if there are fields to update
             if update_fields:
-                result = db.Board.update_one(
+                db.Board.update_one(
                     {'_id': ObjectId(board_id)},
                     {
                         '$set': update_fields,
@@ -224,21 +235,11 @@ class Board:
                     }
                 )
 
-                if result.modified_count > 0:
-                    # Fetch updated board
-                    data = db.Board.find_one({'_id': ObjectId(board_id)})
-                    board = json.loads(json_util.dumps(data))                    
-                    return jsonify({
-                        'message': 'Board updated successfully',
-                        'data': board,
-                    }), 200
-                else:
-                    return jsonify({'message': 'No changes were made to the Board'}), 200
-            else:
-                return jsonify({'message': 'No valid fields provided for update'}), 400
+            data = db.Board.find_one({'_id': ObjectId(board_id)})
+            return serialize_document(data)
 
         except Exception as e:
-            return jsonify({'error': f'Error updating board {board_id}: {str(e)}'}), 500
+            return None
         
 
     @staticmethod
@@ -246,12 +247,9 @@ class Board:
         print("this is board ID", board_id, "this is user_id", user_id)  
         result = db.Board.delete_one({'_id': ObjectId(board_id), 'user_id' : ObjectId(user_id)})
         if result.deleted_count == 1 :
-            message = {'message' : f'Deleted Successfully' }
             projectcollection = db.get_collection('proojects')
             taskcollection = db.get_collection('tasks')
             projectcollection.delete_many({'assigned_board': ObjectId(board_id)})
             taskcollection.delete_many({'assigned_board': ObjectId(board_id)})
-            return message, 200
-        else : 
-            message = {'message' : f'Failed to Delete'}
-            return message, 400
+            return True
+        return False

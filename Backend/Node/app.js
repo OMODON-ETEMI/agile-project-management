@@ -56,6 +56,10 @@ mongoose.connect(uri)
     io.on('connection', (socket) => {
       console.log('A client connected:', socket.id);
 
+      socket.on('user:join', (userId) => {
+        socket.join(userId);
+      });
+
       socket.on('disconnect', () => {
         console.log('A user disconnected:', socket.id)
       })

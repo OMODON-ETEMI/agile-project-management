@@ -11,14 +11,16 @@ class Roles(Enum):
 
 # Organization-level permissions
 ORGANIZATION_PERMISSIONS = {
-    'Admin': [
+    'admin': [
         'manage_organization',
         'manage_workspaces',
         'invite_users_to_org',
         'manage_billing',
-        'delete_organization'
+        'delete_organization',
+        'view_organization',
+        'view_workspaces'
     ],
-    'Member': [
+    'member': [
         'view_organization',
         'view_workspaces'
     ]
@@ -36,6 +38,7 @@ WORKSPACE_PERMISSIONS = {
         'delete_tasks',
         'assign_tasks',
         'change_task_status',
+        'view_workspace',
         'view_tasks',
         'view_analytics',
         'create_comments',
@@ -45,6 +48,8 @@ WORKSPACE_PERMISSIONS = {
         'create_tasks',
         'edit_own_tasks',
         'assign_tasks',
+        'delete_own_tasks',
+        'view_workspace',
         'change_task_status',
         'view_tasks',
         'create_comments',
@@ -53,6 +58,7 @@ WORKSPACE_PERMISSIONS = {
     ],
     'Viewer': [
         'view_tasks',
+        'view_workspace',
         'create_comments',
         'edit_own_comments'
     ]
@@ -178,14 +184,32 @@ class PermissionService:
         return result.modified_count > 0
     
 
-    def get_user_permissions(user_id, organisation_id=None, workspace_id=None):
+    def get_user_permissions(user_id, organisation_id=None, workspace_id=None, organisation_slug=None, workspace_slug=None):
         """
         Get user's role at organization or workspace level.
         Supports:
-        - org-only
-        - workspace-only
-        - org + workspace
+        - org-only (by ID or slug)
+        - workspace-only (by ID or slug)
+        - org + workspace (by IDs or slugs)
         """
+        
+        # Resolve slugs to IDs
+        try:
+            if organisation_slug and not organisation_id:
+                org_doc = db.organisation.find_one({"slug": organisation_slug}, {"_id": 1})
+                if org_doc:
+                    organisation_id = org_doc["_id"]
+                else:
+                    return None
+            
+            if workspace_slug and not workspace_id:
+                ws_doc = db.Workspace.find_one({"slug": workspace_slug}, {"_id": 1})
+                if ws_doc:
+                    workspace_id = ws_doc["_id"]
+                else:
+                    return None
+        except Exception:
+            return None
         
         # Normalize IDs
         try:
@@ -222,8 +246,6 @@ class PermissionService:
         user_perms = db.user_permissions.find_one(query, {"organizations": 1})
         if not user_perms or "organizations" not in user_perms:
             return None
-        
-        # print('User permission', user_perms)
 
         # Look at all orgs in case multiple matched
         for org in user_perms.get("organizations", []):
@@ -242,30 +264,34 @@ class PermissionService:
                         }
 
     
-    def has_organization_permission( user_id, org_id, permission):
+    def has_organization_permission(user_id, org_id=None, permission=None, org_slug=None):
         """Check if user has permission in organization"""
-        user_perms = PermissionService.get_user_permissions(user_id, org_id)
+        # print('Checking org permission for user_id:', user_id, 'org_id:', org_id, 'org_slug:', org_slug, 'permission:', permission)
+        user_role = PermissionService.get_user_permissions(user_id, organisation_id=org_id, organisation_slug=org_slug)
         
-        for org in user_perms.get("organizations", []):
-            if str(org["organizationId"]) == org_id:
-                user_role = org["role"]
-                org_permissions = ORGANIZATION_PERMISSIONS.get(user_role, [])
-                return permission in org_permissions
+        print('User permissions for org:', user_role)
         
-        return False
+        if not user_role:
+            return False
+        
+        org_permissions = ORGANIZATION_PERMISSIONS.get(user_role, [])
+        return permission in org_permissions
     
-    def has_workspace_permission(user_id, workspace_id, permission):
+    def has_workspace_permission(user_id, workspace_id=None, permission=None, workspace_slug=None):
         """Check if user has permission in workspace"""
-        user_perms = db.get_user_permissions(user_id)
+        user_perms = PermissionService.get_user_permissions(user_id, workspace_id=workspace_id, workspace_slug=workspace_slug)
         
-        for org in user_perms.get("organizations", []):
-            for workspace in org.get("workspaces", []):
-                if str(workspace["workspaceId"]) == workspace_id:
-                    user_role = workspace["role"]
-                    workspace_permissions = WORKSPACE_PERMISSIONS.get(user_role, [])
-                    return permission in workspace_permissions
+        if not user_perms:
+            return False
         
-        return False
+        # Handle dict response from get_user_permissions when workspace_id is matched
+        if isinstance(user_perms, dict) and "role" in user_perms:
+            user_role = user_perms.get("role")
+        else:
+            user_role = user_perms
+        
+        workspace_permissions = WORKSPACE_PERMISSIONS.get(user_role, [])
+        return permission in workspace_permissions
     
     def update_user_role( user_id, org_id=None, workspace_id=None, new_role=None):
         """Update user's role in organization or workspace"""

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from package.config.auth import AuthManager
 from package.config.security import SecurityConfig
 import os
+from package.config.utility import serialize_document
 import jwt
 from bson import json_util, ObjectId
 from package import db
@@ -43,40 +44,25 @@ class User:
         
         new_user = db.Users.find_one({'_id': result.inserted_id})
         if new_user:
-            user_data = json.loads(json_util.dumps(new_user))
+            user_data = serialize_document(new_user)
             access_token = self.create_access_token(user_data)
             refresh_token = self.create_refresh_token(user_data)
-            response = make_response(jsonify({
-                    'response': f'Your Account has been created, {new_user["firstname"]}',
-                    'token': access_token
-                }))
-            response.set_cookie('refresh_token',
-                                 refresh_token, 
-                                 httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY ,
-                                 secure= SecurityConfig.SESSION_COOKIE_SECURE, 
-                                 samesite= SecurityConfig.SESSION_COOKIE_SAMESITE, 
-                                 max_age=60 * 60 * 24 * 7,  # 7 days
-                                 path= '/', )
-            response.status_code = 200
-            return response
+            return user_data, access_token, refresh_token
         else:
-            return Response(json.dumps({'Error': 'Failed to create account'}), mimetype='application/json'), 500
+            return None, None, None
         
     @staticmethod
     def user():
         users = db.Users.find()
-        users_list = [json.loads(json_util.dumps(user)) for user in users]
-        return jsonify(users_list), 200
+        return serialize_document(list(users))
     
     @staticmethod
     def find_user(id):
         user_id = ObjectId(id)
         user = db.Users.find_one({'_id': user_id})
         if user:
-            user['_id'] = str(user['_id']) 
-            return jsonify(user), 200  
-        else:
-            return jsonify({'Error': 'User not found'}), 404 
+            return serialize_document(user)
+        return None
         
     @staticmethod
     def find_multiple_users(user_data):
@@ -100,8 +86,7 @@ class User:
     @staticmethod
     def search(name):
         users = db.Users.find({'username': {'$regex': f'.*{name}*.', '$options': 'i'}})
-        user_list = [{'username': user['username']} for user in users]
-        return jsonify(user_list), 200
+        return serialize_document(list(users))
     
     @staticmethod
     def search_email(email):
@@ -113,7 +98,7 @@ class User:
     def create_access_token(user_data):
         """Create access token with 30-minutes expiry"""
         payload = {
-            'user_id': user_data['_id']['$oid'],
+            'user_id': user_data['_id'],
             'username': user_data['username'],
             'first_name': user_data['firstname'],
             'last_name': user_data['lastname'],
@@ -132,7 +117,7 @@ class User:
     def create_refresh_token(user_data):
         """Create refresh token with 7-days expiry"""
         return jwt.encode({
-            'user_id': user_data['_id']['$oid'],
+            'user_id': user_data['_id'],
             'token_type': 'refresh',
             'jti': str(uuid.uuid4()),
             'exp': int((datetime.now(timezone.utc) + SecurityConfig.JWT_REFRESH_TOKEN_EXPIRES).timestamp()),
@@ -187,10 +172,10 @@ class User:
                 }
             }
         ]
-        User_data = list(db.Users.aggregate(pipline))
-        if not User_data:
-            return "User not found", 404
-        return User_data
+        user_data = list(db.Users.aggregate(pipline))
+        if not user_data:
+            return None
+        return serialize_document(user_data)
 
     @staticmethod
     def login(username, password, ip_address):
@@ -211,8 +196,8 @@ class User:
 
             #Generating tokens
             try:
-                user_data = json.loads(json_util.dumps(user))
-                Data = json.loads(json_util.dumps(User.User_Data(user_data['_id']['$oid'])))
+                user_data = serialize_document(user)
+                Data = User.User_Data(user_data['_id'])
                 access_token = User.create_access_token(user_data)
                 refresh_token = User.create_refresh_token(user_data)
                 
@@ -307,10 +292,9 @@ class User:
             AuthManager.block_token(token)
 
             #Generate new tokens
-            user_data = json.loads(json_util.dumps(user))
+            user_data = serialize_document(user)
             access_token = User.create_access_token(user_data)
             refresh_token = User.create_refresh_token(user_data)
-            print('Generated new tokens during refresh: ', refresh_token, access_token)
             response = make_response(jsonify({'token': access_token}))
             response.set_cookie('refresh_token',
                                  refresh_token, 
@@ -337,6 +321,7 @@ class User:
     @staticmethod
     def server_Refresh(token):
         payload = jwt.decode(token, current_app.config['JWT_REFRESH_SECRET_KEY'], ALGORITHM)
+        
         if payload['token_type'] != 'refresh':
             response = make_response(jsonify({'Error': 'Token type invalid'}))
             response.delete_cookie('refresh_token', path='/')
@@ -356,20 +341,17 @@ class User:
             
 
             #Generate new tokens
-            user_data = json.loads(json_util.dumps(user))
+            user_data = serialize_document(user)
             access_token = User.create_access_token(user_data)
-            print('Generated new tokens during server refresh: ', access_token)
             response = make_response(jsonify({'token': access_token}))
             response.status_code = 200
             return response
         except jwt.ExpiredSignatureError:
-            print('Token expired during refresh')
             response = make_response(jsonify({'error': 'Token expired'}))
             response.delete_cookie('refresh_token', path='/')
             response.status_code = 401
             return response
         except jwt.InvalidTokenError:
-            print('Invalid token during refresh')
             response = make_response(jsonify({'Error': 'Invalid token'}))
             response.delete_cookie('refresh_token', path='/')
             response.status_code = 401

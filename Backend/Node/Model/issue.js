@@ -126,17 +126,17 @@ const IssueSchema = new mongoose.Schema({
     } 
  
   }],
-  creator: { 
+  reporter: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Users', 
     required: true ,
     index: true,
   },
-  assignees: [{ 
+  assignees: { 
     type: mongoose.Schema.Types.ObjectId, 
     index: true,
     ref: 'Users' 
-  }],
+ },
   priority: { 
     type: String, 
     enum: ['High', 'Medium', 'Low'], 
@@ -146,6 +146,11 @@ const IssueSchema = new mongoose.Schema({
     type: String, 
     enum: ['Backlog', 'To Do', 'In Progress', 'Done', 'Cancelled', 'On Hold', 'Review'], 
     default: 'Backlog' ,
+    index: true,
+  },
+  position: {
+    type: Number,
+    default: 0,
     index: true,
   },
   createdAt: { 
@@ -238,6 +243,7 @@ const IssueSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'Users', required: true },
     description: { type: String, default: null }
   }],
+  
 });
 
 /**
@@ -251,7 +257,7 @@ IssueSchema.pre('save', async function (next) {
       const Issue = mongoose.connection.db.collection('Issue');
 
       // Check if creator exists
-      const creatorExists = await User.findOne({ _id: new mongoose.Types.ObjectId(this.creator) });
+      const creatorExists = await User.findOne({ _id: new mongoose.Types.ObjectId(this.reporter) });
       if (!creatorExists) {
           return next(new Error('Invalid creator: User does not exist.'));
       }
@@ -268,7 +274,7 @@ IssueSchema.pre('save', async function (next) {
         this.statusHistory = [{
           status: this.status,
           timestamp: this.createdAt || new Date(),
-          changedBy: this.creator
+          changedBy: this.reporter
         }]
       }
 
@@ -307,40 +313,12 @@ IssueSchema.pre('save', async function (next) {
   }
 });
 
+IssueSchema.index({
+  title: "text",
+  description: "text",
+});
+
 // Create the Issue model from the schema
 const Issue = mongoose.model('Issue', IssueSchema, 'Issues');
-
-/**
- * Function to search for issues based on specified parameters.
- * @param {Object} queryParam - The parameters for searching issues.
- * @returns {Array} - Array of issues matching the search criteria.
- */
-async function searchIssue(queryParam){
-    try {
-        let query = {};
-
-        if (queryParam.name){
-            query.name = { $regex : queryParam.name, $options : 'i'};
-        }
-
-        if (queryParam.category){
-            query.category = queryParam.category;
-        }
-
-        if (queryParam.issueID){
-            query.issueID = queryParam.issueID;
-        }
-
-        if (queryParam.ID){
-            query._id = queryParam.ID;
-        }
-
-        const issues = await Issue.find(query);
-        return issues;
-    } catch (error) {
-        console.error('Error searching issues:', error);
-        throw error;
-    }
-}
 
 module.exports = { Issue, generateId };
