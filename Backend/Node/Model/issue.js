@@ -68,7 +68,7 @@ const IssueSchema = new mongoose.Schema({
   },
   workspace_id: { 
     type: mongoose.Schema.Types.ObjectId, 
-    ref: 'projects', 
+    ref: 'Workspace', 
     required: true,
     index: true,
   },
@@ -150,7 +150,6 @@ const IssueSchema = new mongoose.Schema({
   },
   position: {
     type: Number,
-    default: 0,
     index: true,
   },
   createdAt: { 
@@ -162,10 +161,6 @@ const IssueSchema = new mongoose.Schema({
     type: Date, 
     default: Date.now,
     index: true
-  },
-  endDate: { 
-    type: Date, 
-    default: null 
   },
   color: {
     type: String, 
@@ -187,6 +182,32 @@ const IssueSchema = new mongoose.Schema({
     type: Number, 
     default: 0 
   },
+  labels: [{
+  type: String,
+  trim: true,
+  index: true
+}],
+
+dueDate: {
+  type: Date,
+  default: null
+},
+
+comments: [{
+  author: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Users",
+    required: true
+  },
+  body: {
+    type: String,
+    required: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}],
   updateHistory : [
     {
       field: { type: String, required: true }, // Name of the field being updated (e.g., 'status', 'priority')
@@ -256,34 +277,34 @@ IssueSchema.pre('save', async function (next) {
       const Project = mongoose.connection.db.collection('projects');
       const Issue = mongoose.connection.db.collection('Issue');
 
-      // Check if creator exists
+      if (this.isNew) {
+      if (!this.reporter) return next(new Error('Reporter is required for new issues.'));
+      
       const creatorExists = await User.findOne({ _id: new mongoose.Types.ObjectId(this.reporter) });
       if (!creatorExists) {
-          return next(new Error('Invalid creator: User does not exist.'));
+        return next(new Error('Invalid Reporter: User does not exist.'));
       }
 
-      // Check if board exists
+      if (!this.issueID) {
+        this.issueID = generateId(this.issuetype, this.title);
+      }
+      
+      // Setup status history for new issues
+      if (this.status) {
+        this.statusHistory = [{
+          status: this.status,
+          timestamp: new Date(),
+          changedBy: this.reporter
+        }];
+      }
+    }
+
+          // Check if board exists
       if (this.issuetype !== "Epic" && this.board_id) {
         const boardExists = await Board.findOne({ _id: new mongoose.Types.ObjectId(this.board_id) });
         if (!boardExists) {
             return next(new Error('Invalid board_id: Board does not exist.'));
         }
-      }
-
-      if (this.isNew && this.status) {
-        this.statusHistory = [{
-          status: this.status,
-          timestamp: this.createdAt || new Date(),
-          changedBy: this.reporter
-        }]
-      }
-
-      // Check if project exists (if provided)
-      if (this.project) {
-          const projectExists = await Project.findOne({ _id: new mongoose.Types.ObjectId(this.project) });
-          if (!projectExists) {
-              return next(new Error('Invalid project: Project does not exist.'));
-          }
       }
 
       // Check if parent exists only if issuetype is "Sub-task"
@@ -295,16 +316,11 @@ IssueSchema.pre('save', async function (next) {
       }
 
       //check if issue is 'Task' or 'Story' and has a parent it must belong to a Epic
-      if (this.issuetype === "Task" || this.issuetype === "Story" && this.parent) {
+      if ((this.issuetype === "Task" || this.issuetype === "Story") && this.parent) {
         const parentIssue = await Issue.findOne({ _id: new mongoose.Types.ObjectId(this.parent) });
         if (!parentIssue || parentIssue.issuetype !== "Epic") {
             return next(new Error('Invalid parent: Parent issue must be an Epic for Task or Story.'));
         }
-      }
-
-      if (!this.issueID) {
-        const id = generateId(this.issuetype, this.title);
-        this.issueID = id;
       }
 
       next(); // Proceed with saving if everything is valid

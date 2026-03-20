@@ -16,14 +16,15 @@ function initModels() {
 const getSprint = async (sprintID) => {
   const { Board } = initModels();
   const sprint = await Board.findOne({ _id: sprintID });
-  if (!sprint) throw new Error('Sprint not found');
+  if (!sprint) return Error('Sprint not found');
   return sprint;
 };
 
 const getIssues = async (sprint) => {
   const { Issue } = initModels();
-  return Issue.find({
+  return await Issue.find({
     board_id: sprint._id,
+    issuetype: { $ne: 'Epic' },
     status: { $ne: 'Cancelled' }
   }).toArray();
 };
@@ -112,25 +113,64 @@ async function BurndownData(sprintID) {
   const burndown = await computeDailyBurndown(sprint, issues, totalPoints);
 
   return {
-    sprintID: sprint._id,
-    totalPoints,
-    completedPoints,
-    remainingPoints: totalPoints - completedPoints,
-    netScopeChange: addedPoints - removedPoints,
-    burndown
-  };
-
+  sprintID: sprint._id,
+  totalPoints: Number(totalPoints),
+  completedPoints: Number(completedPoints),
+  remainingPoints: Number(totalPoints) - Number(completedPoints),
+  netScopeChange: Number(addedPoints) - Number(removedPoints),
+  burndown
+};
 }
 
-async function VelocityTracking(sprint){
+async function cummulativeFlow(sprintID) {
+  const sprint = await getSprint(sprintID);
+  const issues = await getIssues(sprint);
+  const startDate = new Date(sprint.startDate);
+  const endDate = new Date(sprint.endDate);
+  
+  const days = []
+   let current = new Date(startDate);
 
-    return {
-        sprintID: sprint.ID,
-        completedStoryPoints
+  while (current <= endDate) {
+    days.push(new Date(current));
+    current.setDate(current.getDate() + 1);
+  }
+
+  const result = days.map((day) => {
+    const counts = {
+      "Backlog": 0,
+      "To Do": 0,
+      "In Progress": 0,
+      "Done": 0,
+      "Cancelled": 0,
     };
+
+    for (const issue of issues) {
+      let lastStatus = null;
+
+      for (const change of issue.statusHistory) {
+        if (new Date(change.timestamp) <= day) {
+          lastStatus = change.status;
+        } else {
+          break;
+        }
+      }
+
+      if (lastStatus && counts[lastStatus] !== undefined) {
+        counts[lastStatus]++;
+      }
+    }
+    return {
+      date: day,
+      ...counts,
+    };
+  });
+  console.log(result)
+  return result;
 }
+
 
 module.exports = {
     BurndownData,
-    VelocityTracking
+    cummulativeFlow
 }

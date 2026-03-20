@@ -58,7 +58,17 @@ mongoose.connect(uri)
 
       socket.on('user:join', (userId) => {
         socket.join(userId);
+        console.log(`User ${socket.id} is now watching User: ${userId}`);
       });
+
+    socket.on('wrk:join', (orgId) => {
+      socket.join(orgId);
+        console.log(`User ${socket.id} is now watching Org: ${orgId}`);
+      });
+
+    socket.on('wrk:leave', (orgId) => {
+      socket.leave(orgId);
+    });
 
       socket.on('disconnect', () => {
         console.log('A user disconnected:', socket.id)

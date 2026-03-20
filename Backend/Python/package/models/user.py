@@ -169,6 +169,9 @@ class User:
             {
                 '$project': {
                     'user_Orgs': 0,
+                    'password': 0,
+                    'createdAt': 0,
+                    'updatedAt': 0,
                 }
             }
         ]
@@ -200,7 +203,6 @@ class User:
                 Data = User.User_Data(user_data['_id'])
                 access_token = User.create_access_token(user_data)
                 refresh_token = User.create_refresh_token(user_data)
-                
             except Exception as e:
                 print('Token Generation Error:', str(e))
                 return jsonify({'Message': 'Failed to generate tokens',

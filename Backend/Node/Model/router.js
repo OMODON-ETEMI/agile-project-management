@@ -2,9 +2,11 @@
 const mongoose = require("mongoose");
 const { validateObjectId, validateInsertIds } = require("../utility/validation");
 const upload = require("../utility/multer");
+const { Issue } = require("../Model/issue");
 const {
   createIssue,
   searchIssues,
+  addComment,
   getEpics,
   updateIssueMetadata,
   transitionIssueStatus,
@@ -30,7 +32,7 @@ const {
 } = require("../Controller/notificationController");
 
 
-const { BurndownData, VelocityTracking } = require("../Controller/metrics");
+const { BurndownData, cummulativeFlow } = require("../Controller/metrics");
 
 const issueRouter = require("express").Router();
 const projectRouter = require("express").Router();
@@ -80,6 +82,63 @@ issueRouter.post("/issue/search", async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       message: "Error searching issues",
+      error: error.message,
+    });
+  }
+});
+issueRouter.post("/issue/:issueId/comment", async (req, res) => {
+  try {
+    const { issueId } = req.params;
+    const { body } = req.body;
+
+    const userId = req.user?.id; // depends on your auth middleware
+
+    if (!issueId) {
+      return res.status(400).json({
+        message: "issueId is required",
+      });
+    }
+
+    if (!body || body.trim() === "") {
+      return res.status(400).json({
+        message: "Comment body is required",
+      });
+    }
+
+    const comment = await addComment(issueId, userId, body);
+
+    return res.status(201).json({
+      message: "Comment added successfully",
+      data: comment,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error adding comment",
+      error: error.message,
+    });
+  }
+});
+
+issueRouter.get("/issue/:issueId/comments", async (req, res) => {
+  try {
+    const { issueId } = req.params;
+
+    const issue = await Issue.findById(new mongoose.Types.ObjectId(issueId))
+
+    if (!issue) {
+      return res.status(404).json({
+        message: "Issue not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Comments retrieved successfully",
+      count: issue.comments.length,
+      data: issue.comments,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error retrieving comments",
       error: error.message,
     });
   }
@@ -203,10 +262,26 @@ issueRouter.post("/issue/reorder", async (req, res) => {
 
 issueRouter.get("/issue/burndown", validateObjectId(['sprintID']), async (req, res) => {
     try {
-      const burndownData = await BurndownData(new mongoose.Types.ObjectId(req.body.sprintID));
+      const burndownData = await BurndownData(new mongoose.Types.ObjectId(req.query.sprintID));
       res.status(200).json({
         message: "Burndown data retrieved successfully",
         data: burndownData,
+      })
+    } catch (error) {
+      res.status(500).json({
+        message: "Error retrieving burndown data",
+        error: error.message,
+      });
+    }
+  }
+);
+
+issueRouter.get("/issue/cummulativeFlow", validateObjectId(['sprintID']), async (req, res) => {
+    try {
+      const cummulativeData = await cummulativeFlow(new mongoose.Types.ObjectId(req.query.sprintID));
+      res.status(200).json({
+        message: "Burndown data retrieved successfully",
+        data: cummulativeData,
       })
     } catch (error) {
       res.status(500).json({
@@ -298,166 +373,6 @@ issueRouter.delete(
   }
 );
 
-// Project Routes
-projectRouter.post("/project/create", async (req, res) => {
-  try {
-    const { name, creator } = req.body;
-
-    if (!name || !creator) {
-      return res.status(400).json({
-        message: "Missing required fields",
-      });
-    }
-
-    const project = await createProject(req.body);
-
-    res.status(201).json({
-      message: "Project created successfully",
-      data: project,
-    });
-  } catch (error) {
-    res.status(400).json({
-      message: "Project creation failed",
-      error: error.message,
-    });
-  }
-});
-
-projectRouter.get("/project/search", async (req, res) => {
-  try {
-    const queryParams = {
-      ...req.body,
-      ...req.query,
-    };
-
-    if (Object.keys(queryParams).length === 0) {
-      return res.status(400).json({
-        message: "Missing search parameters",
-      });
-    }
-
-    const projects = await searchProjects(queryParams);
-
-    if (projects.length === 0) {
-      return res.status(404).json({
-        message: "No projects found",
-      });
-    }
-
-    res.status(200).json({
-      message: "Projects retrieved successfully",
-      count: projects.length,
-      data: projects,
-    });
-  } catch (error) {
-    res.status(500).json({
-      message: "Error searching projects",
-      error: error.message,
-    });
-  }
-});
-
-projectRouter.get("/board/:boardId/search", async (req, res) => {
-  try {
-    const { boardId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(boardId)) {
-      return res.status(400).json({
-        message: "Invalid board ID",
-      });
-    }
-
-    const projects = await searchProjects({ board_id: boardId });
-
-    if (projects.length === 0) {
-      return res.status(404).json({
-        message: "No projects found for this board",
-      });
-    }
-
-    res.status(200).json({
-      message: "Projects retrieved successfully",
-      count: projects.length,
-      data: projects,
-    });
-  } catch (error) {
-    res.status(500).json({
-      message: "Error searching projects",
-      error: error.message,
-    });
-  }
-});
-
-projectRouter.get(
-  "/project/search/category",
-  validateObjectId(["board_id", "ID"]),
-  async (req, res) => {
-    try {
-      const { board_id, ID } = req.body;
-
-      const categorizedProjects = await getProjectsByCategory(board_id, ID);
-
-      if (Object.keys(categorizedProjects).length === 0) {
-        return res.status(404).json({
-          message: "No projects found",
-        });
-      }
-
-      res.status(200).json({
-        message: "Projects categorized successfully",
-        data: categorizedProjects,
-      });
-    } catch (error) {
-      res.status(500).json({
-        message: "Error categorizing projects",
-        error: error.message,
-      });
-    }
-  }
-);
-
-projectRouter.patch(
-  "/project/update",
-  validateObjectId(["ID", "creator"]),
-  async (req, res) => {
-    try {
-      const updatedProject = await updateProject(req.body);
-
-      if (!updatedProject) {
-        return res.status(404).json({  message: "Project not found or no updates applied" });
-      }
-
-      res.status(200).json({
-        message: "Project updated successfully",
-        data: updatedProject,
-      });
-    } catch (error) {
-      res.status(500).json({
-        message: "Error updating project",
-        error: error.message,
-      });
-    }
-  }
-);
-
-projectRouter.delete( "/project/delete", validateObjectId(["_id", "board_id"]), async (req, res) => {
-    try {
-      const deletedProject = await deleteProject(req.body);
-      if (!deletedProject) {
-        return res.status(404).json({ message: "Project not found" });
-       }
-      res.status(200).json({
-        message: "Project deleted successfully",
-        data: deletedProject,
-      });
-    } catch (error) {
-      res.status(500).json({
-        message: "Error deleting project",
-        error: error.message,
-      });
-    }
-  }
-);
 
 // Notification Routes
 notificationRouter.post("/notification/create", async (req, res) => {

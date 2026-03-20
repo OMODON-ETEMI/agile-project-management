@@ -8,6 +8,7 @@ module.exports.start = async () => {
 
     await client.subscribe("organization_events", (message) => {
         data = JSON.parse(message)
+        console.log(data)
         eventBus.emit("notification:create", data)
     })
 

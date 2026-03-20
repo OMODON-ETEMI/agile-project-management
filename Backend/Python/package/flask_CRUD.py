@@ -337,7 +337,7 @@ def create_board():
     if not data: 
         return jsonify({'error': 'Invalid or Missing JSON in request'}), 404
     title = data.get('title')
-    user_id = data.get('user_id')
+    user_id = g.user_id
     type = data.get('type')
     image = data.get('image')
     createdAt = datetime.now(timezone.utc)

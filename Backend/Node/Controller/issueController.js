@@ -1,33 +1,40 @@
-const dayjs = require('dayjs');
-const customParseFormat = require('dayjs/plugin/customParseFormat');
-const { default: mongoose } = require('mongoose');
-const { Issue,generateId } = require('../Model/issue');
-const { emitSocketEvent } = require('../utility/socket');
+const dayjs = require("dayjs");
+const customParseFormat = require("dayjs/plugin/customParseFormat");
+const { default: mongoose } = require("mongoose");
+const { Issue, generateId } = require("../Model/issue");
+const { emitSocketEvent } = require("../utility/socket");
 
 dayjs.extend(customParseFormat);
 
 async function createIssue(issueData) {
   try {
-    // EPIC CREATION LOGIC
+
+    issueData.labels ??= [];
+    issueData.comments ??= [];
+    issueData.storyPoints ??= 0;
+    issueData.priority ??= "Medium";
+
     if (issueData.issuetype === "Epic") {
       issueData.board_id = null;
-      issueData.position = 0; // Epics are not board-positioned
+      issueData.position = 0;
     } else {
-      // NON-EPIC (Board Item)
+
       const position = await Issue.countDocuments({
         board_id: issueData.board_id,
-        issuetype: { $ne: "Epic" } // never count epics
+        issuetype: { $ne: "Epic" }
       });
 
       issueData.position = position + 1;
     }
 
     const issue = new Issue(issueData);
+
     await issue.save();
 
     emitSocketEvent("IssueCreated", issue);
 
     return issue;
+
   } catch (error) {
     throw new Error(`Issue creation failed: ${error.message}`);
   }
@@ -37,6 +44,7 @@ async function searchIssues(queryParams) {
   try {
     const mongoQuery = {};
     const {
+      _id,
       workspace_id,
       board_id,
       creator,
@@ -53,15 +61,14 @@ async function searchIssues(queryParams) {
       sortOrder = "desc",
     } = queryParams;
 
-    // ------------------------------------------------
-    // Mandatory Scope (Workspace Required)
-    // ------------------------------------------------
-    if (!workspace_id) {
-      throw new Error("workspace_id is required");
+    if (_id) {
+      mongoQuery._id = new mongoose.Types.ObjectId(_id);
     }
 
-    mongoQuery.workspace_id = new mongoose.Types.ObjectId(workspace_id);
 
+    if (workspace_id) {
+      mongoQuery.workspace_id = new mongoose.Types.ObjectId(workspace_id);
+    }
     // ------------------------------------------------
     // Board Scope
     // ------------------------------------------------
@@ -73,7 +80,7 @@ async function searchIssues(queryParams) {
     // Creator Filter
     // ------------------------------------------------
     if (creator) {
-      mongoQuery.creator = new mongoose.Types.ObjectId(creator);
+      mongoQuery.reporter = new mongoose.Types.ObjectId(creator);
     }
 
     // ------------------------------------------------
@@ -82,7 +89,7 @@ async function searchIssues(queryParams) {
     if (assignee) {
       mongoQuery.assignees = {
         $in: Array.isArray(assignee)
-          ? assignee.map(id => new mongoose.Types.ObjectId(id))
+          ? assignee.map((id) => new mongoose.Types.ObjectId(id))
           : [new mongoose.Types.ObjectId(assignee)],
       };
     }
@@ -121,20 +128,20 @@ async function searchIssues(queryParams) {
     // Text Search (Title + Description)
     // ------------------------------------------------
     if (search) {
-    mongoQuery.$text = { $search: search };
+      mongoQuery.$text = { $search: search };
     }
 
-  if (epicId) {
-  mongoQuery.parentEpic = new mongoose.Types.ObjectId(epicId);
-  }
+    if (epicId) {
+      mongoQuery.parentEpic = new mongoose.Types.ObjectId(epicId);
+    }
 
-  if (queryParams.updatedAfter) {
-  mongoQuery.updatedAt = { $gte: new Date(queryParams.updatedAfter) };
-}
+    if (queryParams.updatedAfter) {
+      mongoQuery.updatedAt = { $gte: new Date(queryParams.updatedAfter) };
+    }
 
-if (queryParams.unresolvedOnly) {
-  mongoQuery.status = { $nin: ["Done", "Cancelled"] };
-}
+    if (queryParams.unresolvedOnly) {
+      mongoQuery.status = { $nin: ["Done", "Cancelled"] };
+    }
 
     // ------------------------------------------------
     // Sorting
@@ -142,6 +149,10 @@ if (queryParams.unresolvedOnly) {
     const sortOptions = {
       [sortBy]: sortOrder === "asc" ? 1 : -1,
     };
+
+    if(mongoQuery.board_id){
+      sortOptions.position = 1;
+    }
 
     // ------------------------------------------------
     // Pagination
@@ -182,23 +193,25 @@ async function getEpics(workspace_id) {
 }
 
 async function updateIssueMetadata({ issueId, updates }, user_id) {
-  const allowedUpdates = new Set([
-    "title",
-    "description",
-    "storyPoints",
-    "status",
-    "board_id",
-    "assignees",
-    "priority",
-    "parent",
-    "epic",
-    "endDate",
-    "color",
-    "resolutionId"
-  ]);
+const allowedUpdates = new Set([
+  "title",
+  "description",
+  "storyPoints",
+  "status",
+  "board_id",
+  "assignees",
+  "priority",
+  "parent",
+  "epic",
+  "dueDate",
+  "labels",
+  "board_id",
+  "color",
+  "resolutionId"
+]);
 
   const sanitizedUpdates = Object.fromEntries(
-    Object.entries(updates).filter(([key]) => allowedUpdates.has(key))
+    Object.entries(updates).filter(([key]) => allowedUpdates.has(key)),
   );
 
   if (Object.keys(sanitizedUpdates).length === 0) {
@@ -217,7 +230,7 @@ async function updateIssueMetadata({ issueId, updates }, user_id) {
         oldValue: issue[key],
         newValue: sanitizedUpdates[key],
         updatedBy: user_id,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       });
 
       issue[key] = sanitizedUpdates[key];
@@ -231,10 +244,31 @@ async function updateIssueMetadata({ issueId, updates }, user_id) {
   issue.updateHistory.push(...historyEntries);
   issue.updatedAt = new Date();
 
+  const updatedIssue = await issue.save({ validateModifiedOnly: true });
+
+  emitSocketEvent("IssueUpdated", issue, updatedIssue.workspace_id);
+  return issue;
+}
+
+async function addComment(issueId, userId, body) {
+
+  const issue = await Issue.findById(issueId);
+
+  if (!issue) {
+    throw new Error("Issue not found");
+  }
+
+  issue.comments.push({
+    author: userId,
+    body,
+    createdAt: new Date()
+  });
+
   await issue.save();
 
-  emitSocketEvent("IssueUpdated", issue);
-  return issue;
+  emitSocketEvent("IssueCommentAdded", issueId);
+
+  return issue.comments[issue.comments.length - 1];
 }
 
 async function transitionIssueStatus({ issueId, status }, user_id) {
@@ -253,7 +287,7 @@ async function transitionIssueStatus({ issueId, status }, user_id) {
     issue.statusHistory.push({
       status,
       timestamp: new Date(),
-      changedBy: user_id
+      changedBy: user_id,
     });
 
     issue.updateHistory.push({
@@ -261,19 +295,18 @@ async function transitionIssueStatus({ issueId, status }, user_id) {
       oldValue: issue.status,
       newValue: status,
       updatedBy: user_id,
-      updatedAt: new Date()
+      updatedAt: new Date(),
     });
 
     issue.updatedAt = new Date();
 
-    await issue.save({ session });
+    await issue.save({ session, validateModifiedOnly: true });
 
     await session.commitTransaction();
     session.endSession();
 
-    emitSocketEvent("IssueStatusChanged", issue);
+    emitSocketEvent("IssueStatusChanged", issue, issue.workspace_id);
     return issue;
-
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -281,62 +314,106 @@ async function transitionIssueStatus({ issueId, status }, user_id) {
   }
 }
 
+/**
+ * moveIssue: Handles dragging and dropping issues across columns or boards.
+ * Fixed: Missing awaits, same-status save, and cross-board counting logic.
+ */
 async function moveIssue({ issueId, board_id, status, position }, user_id) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const session =
+    process.env.USE_TRANSACTIONS === "true"
+      ? await mongoose.startSession()
+      : null;
+
+  if (session) session.startTransaction();
 
   try {
     const issue = await Issue.findById(issueId).session(session);
     if (!issue) throw new Error("Issue not found");
 
-    const oldBoard = issue.board_id;
+    const oldBoardId = issue.board_id;
     const oldStatus = issue.status;
+    const targetBoardId = new mongoose.Types.ObjectId(board_id);
 
-    // Shift issues in target column
-    await Issue.updateMany(
-      {
-        board_id,
-        status,
-        position: { $gte: position }
-      },
-      { $inc: { position: 1 } },
-      { session }
-    );
+    // SCENARIO 1: Same Board & Same Status (Reordering)
+    if (oldBoardId.equals(targetBoardId) && oldStatus === status) {
+      const moveUp = position < issue.position;
+      await Issue.updateMany(
+        {
+          _id: { $ne: issueId },
+          board_id: oldBoardId, // Explicitly target current board
+          status,
+          position: moveUp
+            ? { $gte: position, $lt: issue.position }
+            : { $gt: issue.position, $lte: position },
+        },
+        { $inc: { position: moveUp ? 1 : -1 } },
+        { session },
+      );
 
-    issue.board_id = board_id;
-    issue.status = status;
-    issue.position = position;
-
-    if (!oldBoard.equals(board_id)) {
-      issue.boardHistory.push({
-        board_id,
-        action: "added",
-        timestamp: new Date(),
-        movedBy: user_id
-      });
+      issue.position = position; // 👈 Fixed: Actually update the moving issue
     }
 
-    if (oldStatus !== status) {
-      issue.statusHistory.push({
-        status,
-        timestamp: new Date(),
-        changedBy: user_id
-      });
+    // SCENARIO 2: Different Status OR Different Board (Transition)
+    else {
+      // 1. Cleanup: Close the gap in the source column
+      await Issue.updateMany(
+        {
+          _id: { $ne: issueId },
+          board_id: oldBoardId,
+          status: oldStatus,
+          position: { $gt: issue.position },
+        },
+        { $inc: { position: -1 } },
+        { session },
+      );
+
+      // 2. Append: Get count from the TARGET board and status
+      const currentCount = await Issue.countDocuments({
+        board_id: targetBoardId, // 👈 Fixed: Use the destination board ID
+        status: status,
+      }).session(session);
+
+      // 3. Update History
+      if (!oldBoardId.equals(targetBoardId)) {
+        issue.boardHistory.push({
+          board_id: targetBoardId,
+          action: "added",
+          timestamp: new Date(),
+          movedBy: new mongoose.Types.ObjectId(user_id),
+        });
+      }
+
+      if (oldStatus !== status) {
+        issue.statusHistory.push({
+          status,
+          timestamp: new Date(),
+          changedBy: new mongoose.Types.ObjectId(user_id),
+        });
+      }
+
+      issue.board_id = targetBoardId;
+      issue.status = status;
+      issue.position = currentCount; // Append to bottom
     }
 
     issue.updatedAt = new Date();
 
-    await issue.save({ session });
+    // 👈 Fixed: Added 'await' and made sure Scenario 1 also saves
+    await issue.save({ session, validateModifiedOnly: true });
 
-    await session.commitTransaction();
-    session.endSession();
+    if (session) {
+      await session.commitTransaction();
+      session.endSession();
+    }
 
-    emitSocketEvent("IssueMoved", issue);
+    emitSocketEvent("IssueMoved", issue, issue.workspace_id);
     return issue;
-
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+    if (session) {
+      await session.abortTransaction();
+      session.endSession();
+    }
+    console.error("Move Issue Failed:", err.message);
     throw err;
   }
 }
@@ -348,9 +425,13 @@ async function reorderColumn({ board_id, status, orderedIssueIds }, user_id) {
   try {
     for (let i = 0; i < orderedIssueIds.length; i++) {
       await Issue.updateOne(
-        { _id: orderedIssueIds[i], board_id, status },
+        {
+          _id: new mongoose.Types.ObjectId(orderedIssueIds[i]),
+          board_id,
+          status,
+        },
         { position: i + 1 },
-        { session }
+        { session },
       );
     }
 
@@ -358,7 +439,6 @@ async function reorderColumn({ board_id, status, orderedIssueIds }, user_id) {
     session.endSession();
 
     return { success: true };
-
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -366,17 +446,16 @@ async function reorderColumn({ board_id, status, orderedIssueIds }, user_id) {
   }
 }
 
-
-async function importIssue(issueData, addedData ) {
-  if(!Array.isArray(issueData) || issueData.length === 0){
-    throw new Error('Invalid issue data format');
+async function importIssue(issueData, addedData) {
+  if (!Array.isArray(issueData) || issueData.length === 0) {
+    throw new Error("Invalid issue data format");
   }
 
-  const parseDate = (dateString, format = 'YYYY-MM-DD') => {
-    if(!dateString) return false;
+  const parseDate = (dateString, format = "YYYY-MM-DD") => {
+    if (!dateString) return false;
     const parsed = dayjs(dateString, format, true);
     return parsed.isValid() ? parsed.toDate() : false;
-  }
+  };
   try {
     const enrichedIssues = issueData.map((issue) => ({
       ...issue,
@@ -384,29 +463,39 @@ async function importIssue(issueData, addedData ) {
       endDate: parseDate(issue.endDate) || null,
       workspace_id: new mongoose.Types.ObjectId(addedData.workspace_id),
       creator: new mongoose.Types.ObjectId(addedData.creator),
-      board_id: issue.issuetype !== "Epic" ? new mongoose.Types.ObjectId(addedData.board_id) : null,
-      storyPoints: issue.storyPoints == null ? Math.floor(Math.random() * 10) : issue.storyPoints,
-      issueID: generateId(issue.issuetype || 'Task', issue.title),
-      statusHistory: issue.status ? [{
-        status: issue.status,
-        timestamp: parseDate(issue.createdAt) || Date.now(),
-        changedBy: addedData.creator
-      }] : [],
-    }))
+      board_id:
+        issue.issuetype !== "Epic"
+          ? new mongoose.Types.ObjectId(addedData.board_id)
+          : null,
+      storyPoints:
+        issue.storyPoints == null
+          ? Math.floor(Math.random() * 10)
+          : issue.storyPoints,
+      issueID: generateId(issue.issuetype || "Task", issue.title),
+      statusHistory: issue.status
+        ? [
+            {
+              status: issue.status,
+              timestamp: parseDate(issue.createdAt) || Date.now(),
+              changedBy: addedData.creator,
+            },
+          ]
+        : [],
+    }));
     const result = await Issue.insertMany(enrichedIssues, { ordered: false });
     return {
       success: true,
       message: `${result.length} issues imported successfully`,
       data: result.length,
-      failed: []
+      failed: [],
     };
   } catch (error) {
-    const failedIndex = error.writeErrors?.map(err => err.index) || [];
-    const failedIssues = failedIndex.map(index => ({
+    const failedIndex = error.writeErrors?.map((err) => err.index) || [];
+    const failedIssues = failedIndex.map((index) => ({
       ...issueData[index],
-      error: error.message
-    }))
-    const insertedCount = error.result?.insertedCount
+      error: error.message,
+    }));
+    const insertedCount = error.result?.insertedCount;
     return {
       success: false,
       message: `${insertedCount} inserted, ${failedIssues.length} failed due to duplicate issueIDs.`,
@@ -419,10 +508,10 @@ async function importIssue(issueData, addedData ) {
 
 async function deleteIssue({ _id }) {
   try {
-    const deletedIssue = await Issue.findOneAndDelete({ _id});
+    const deletedIssue = await Issue.findOneAndDelete({ _id });
 
     if (deletedIssue) {
-      emitSocketEvent('IssueDeleted', deletedIssue);
+      emitSocketEvent("IssueDeleted", deletedIssue);
     }
 
     return deletedIssue;
@@ -434,11 +523,12 @@ async function deleteIssue({ _id }) {
 module.exports = {
   createIssue,
   searchIssues,
+  addComment,
   getEpics,
   updateIssueMetadata,
   transitionIssueStatus,
   moveIssue,
   reorderColumn,
   importIssue,
-  deleteIssue
+  deleteIssue,
 };
