@@ -198,8 +198,8 @@ def create():
         if not  re.match(r'^[\w\.-]+@[\w\.-]+(\.[\w]+)+$', email):
             return jsonify({"message" : 'Please enter a valid email.'}), 400
         else:
-            response, status = User.search(username)
-            data = response.get_json()
+            response = User.search(username)
+            data = response
             result = User.search_email(email) | bool(data)
             if (result):
                 return jsonify({
@@ -241,10 +241,7 @@ def user():
 @app.route('/find', methods=['GET'])
 def find():
     find = User
-    data = request.json
-    if not data: 
-        return jsonify({'error': 'Invalid or Missing JSON in request'}), 404
-    id = data.get('_id')
+    id = request.args.get('_id')
     user = find.find_user(id)
     if user:
         return jsonify(user), 200
@@ -318,9 +315,13 @@ def logout():
             'Error' : 'No Token Provided'
         }), 404
     result = User.logout(token)
-    result.delete_cookie('refresh_token', path='/')
-    result.status_code = 200 if result.get('success') else result.get('status_code', 400)
-    return result
+    if result.get('success'):
+        response = make_response(jsonify({'message': 'Logged out successfully'}))
+        response.delete_cookie('refresh_token', path='/')
+        response.status_code = 200
+        return response
+    else:
+        return jsonify({'Error': 'Logout failed'}), result.get('status_code', 400)
     
 @app.route('/auth/refresh', methods=['POST'])
 @limiter.limit("30 per minute")
