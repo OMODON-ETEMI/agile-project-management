@@ -69,10 +69,6 @@ class Workspace:
         if workspace_id:
             if not ObjectId.is_valid(workspace_id): return None
             ws_oid = ObjectId(workspace_id)
-            # Auth Check: Only return if the user is a member
-            if user_id and ws_oid not in authorized_workspace_ids:
-                return None
-                
             workspace = db.Workspace.find_one({'_id': ws_oid})
             if workspace:
                 return serialize_document(workspace)

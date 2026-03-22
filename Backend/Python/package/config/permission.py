@@ -28,13 +28,13 @@ ORGANIZATION_PERMISSIONS = {
 
 # Workspace-level permissions
 WORKSPACE_PERMISSIONS = {
-    'Admin': [
+    'admin': [
         'manage_workspace',
         'invite_users_to_workspace',
         'create_projects',
         'delete_projects', 
         'create_tasks',
-        'edit_all_tasks',
+        'edit_tasks',
         'delete_tasks',
         'assign_tasks',
         'change_task_status',
@@ -44,35 +44,26 @@ WORKSPACE_PERMISSIONS = {
         'create_comments',
         'delete_comments'
     ],
-    'Developer': [
+    'developer': [
         'create_tasks',
-        'edit_own_tasks',
+        'edit_tasks',
         'assign_tasks',
-        'delete_own_tasks',
+        'delete_tasks',
         'view_workspace',
         'change_task_status',
         'view_tasks',
+        'view_analytics',
         'create_comments',
         'edit_own_comments',
         'create_projects'
     ],
-    'Viewer': [
+    'viewer': [
         'view_tasks',
         'view_workspace',
         'create_comments',
         'edit_own_comments'
     ]
 }
-
-# def can_UOD_org(user_id, organisation_id):
-#     user_org = db.User_Organisation.find_one({'user_id': ObjectId(user_id), 'organisation_id': ObjectId(organisation_id)})
-#     if user_org:
-#         role = user_org.get('role', '')
-#         if role in ['Owner', 'Admin']:
-#             return True
-#     return False
-
-# permission_service.py - Simple version
 
 class PermissionService:
     
@@ -130,20 +121,20 @@ class PermissionService:
         
                 # Check if user is in organization first
         user_in_org = db.User_Organisation.find_one({
-            "userId": ObjectId(user_id),
-            "organizationId": ObjectId(org_id)
+            "user_id": ObjectId(user_id),
+            "organisation_id": ObjectId(org_id)
         })
         
         if not user_in_org:
-            return ("User must be in organization first")
+            return False ,"User must be in organization first"
         
         user_in_workspace = db.User_Workspace.find_one({
-            "userId": ObjectId(user_id),
-            "workspaceId": ObjectId(workspace_id)
+            "user_id": ObjectId(user_id),
+            "workspace_id": ObjectId(workspace_id)
         })
         
         if user_in_workspace:
-            return ("User already in this workspace")
+            return False ,"User already in this workspace"
         
         # Add workspace to user's organization
         db.user_permissions.update_one(
@@ -163,7 +154,7 @@ class PermissionService:
             }
         )
         
-        return True
+        return True, 'successfully added'
     
     def remove_user_from_workspace(user_id, org_id, workspace_id):
         """Remove user from specific workspace"""
@@ -250,13 +241,13 @@ class PermissionService:
         # Look at all orgs in case multiple matched
         for org in user_perms.get("organizations", []):
             # Match org first
-            if organisation_id and org["organizationId"] == organisation_id:
+            if organisation_id and org["organizationId"] == ObjectId(organisation_id):
                 return org.get("role")
 
             # Match by workspace only
             if workspace_id:
                 for ws in org.get("workspaces", []):
-                    if ws["workspaceId"] == workspace_id:
+                    if ws["workspaceId"] == ObjectId(workspace_id):
                         return {
                             "status": "workspace_role",
                             "role": ws.get("role"),
@@ -280,7 +271,7 @@ class PermissionService:
     def has_workspace_permission(user_id, workspace_id=None, permission=None, workspace_slug=None):
         """Check if user has permission in workspace"""
         user_perms = PermissionService.get_user_permissions(user_id, workspace_id=workspace_id, workspace_slug=workspace_slug)
-        
+        print('User permission',user_perms)
         if not user_perms:
             return False
         

@@ -47,13 +47,14 @@ def serialize_document(document):
 def auth_reqired(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # print("request headers:", request.headers)
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
+            print('Authorization header missing or invalid')
             return {'error': 'Authorization is required'}, 401
         
         token = auth_header.split(' ')[1]
         if not token:
+            print('Token is missing')
             return jsonify({'error': 'Token is missing'}), 401
         
         try:
@@ -145,22 +146,21 @@ def require_either_permission(org_perm: str, ws_perm: str):
         def wrapper(*args, **kwargs):
             errors = []
             
-            # 1. Try Org Permission
+            # Try Org Permission
             try:
-                # We simulate calling the logic of your first decorator
                 require_organization_permission(org_perm)(func)(*args, **kwargs)
                 return func(*args, **kwargs)
             except Exception as e:
                 errors.append(e)
 
-            # 2. Try Workspace Permission
+            # Try Workspace Permission
             try:
                 require_workspace_permission(ws_perm)(func)(*args, **kwargs)
                 return func(*args, **kwargs)
             except Exception as e:
                 errors.append(e)
 
-            # 3. If we reached here, both failed
+            # If we reached here, both failed
             return jsonify({
                 "error": f"Missing required permissions: {org_perm} or {ws_perm}",
                 "status_code": 403

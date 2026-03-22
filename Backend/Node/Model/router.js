@@ -15,13 +15,6 @@ const {
   importIssue,
   deleteIssue,
 } = require("../Controller/issueController");
-const {
-  createProject,
-  searchProjects,
-  updateProject,
-  deleteProject,
-  getProjectsByCategory,
-} = require("../Controller/projectController");
 
 const {
   createNotification,
@@ -35,7 +28,6 @@ const {
 const { BurndownData, cummulativeFlow } = require("../Controller/metrics");
 
 const issueRouter = require("express").Router();
-const projectRouter = require("express").Router();
 const notificationRouter = require("express").Router();
 
 
@@ -417,6 +409,5 @@ notificationRouter.delete('/notification/clearAll', async (req, res) => {
 
 module.exports = {
   issueRouter,
-  projectRouter,
   notificationRouter
 };

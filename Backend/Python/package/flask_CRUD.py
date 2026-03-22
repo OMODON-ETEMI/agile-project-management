@@ -229,7 +229,6 @@ def create():
             'message' : 'One or more fields are missing or empty'
         }), 404
     
-
 @app.route('/user', methods=['GET'])
 @limiter.limit("30 per minute")
 @auth_reqired
@@ -288,7 +287,22 @@ def login():
     ip_address = get_ip_address()
 
     if check_list([username, password]):
-        response = user.login(username, password, ip_address)
+        result = user.login(username, password, ip_address)
+        if not result.get('success'):
+            return jsonify({'Error': result.get('error')}), result.get('status_code', 400)
+        
+        response = make_response(jsonify({
+            'response': "Login successful",
+            'data': result['data'],
+            'token': result['access_token']
+        }))
+        response.set_cookie('refresh_token', 
+                             result['refresh_token'], 
+                             httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY,
+                             secure=SecurityConfig.SESSION_COOKIE_SECURE, 
+                             samesite=SecurityConfig.SESSION_COOKIE_SAMESITE, 
+                             max_age=60 * 60 * 24 * 7,  # 7 days
+                             path='/')
         return response
     else :
          return jsonify({
@@ -303,7 +317,10 @@ def logout():
          return jsonify({
             'Error' : 'No Token Provided'
         }), 404
-    return User.logout(token)
+    result = User.logout(token)
+    result.delete_cookie('refresh_token', path='/')
+    result.status_code = 200 if result.get('success') else result.get('status_code', 400)
+    return result
     
 @app.route('/auth/refresh', methods=['POST'])
 @limiter.limit("30 per minute")
@@ -312,7 +329,21 @@ def refresh():
     token = request.cookies.get('refresh_token')
     if not token:
         return jsonify({'Error': 'token required'}), 401
-    response = user.refresh(token)
+    result = user.refresh(token)
+    if not result.get('success'):
+        response = make_response(jsonify({'Error': result.get('error')}))
+        response.delete_cookie('refresh_token', path='/')
+        response.status_code = result.get('status_code', 401)
+        return response
+    
+    response = make_response(jsonify({'token': result['access_token']}))
+    response.set_cookie('refresh_token',
+                         result['refresh_token'], 
+                         httponly=SecurityConfig.SESSION_COOKIE_HTTPONLY,
+                         secure=SecurityConfig.SESSION_COOKIE_SECURE, 
+                         samesite=SecurityConfig.SESSION_COOKIE_SAMESITE, 
+                         max_age=604800, 
+                         path='/')
     return response
 
 @app.route('/auth/server/refresh', methods=['POST'])
@@ -322,11 +353,16 @@ def server_refresh():
     token = request.cookies.get('refresh_token')
     if not token:
         return jsonify({'Error': 'token required'}), 401
-    response = user.server_Refresh(token)
+    result = user.server_Refresh(token)
+    if not result.get('success'):
+        response = make_response(jsonify({'Error': result.get('error')}))
+        response.delete_cookie('refresh_token', path='/')
+        response.status_code = result.get('status_code', 401)
+        return response
+    
+    response = make_response(jsonify({'token': result['access_token']}))
     return response
     
-
-
 # ------------------------- BOARD ---------------------------- #
     
 @app.route('/add/board', methods=['POST'])
@@ -864,18 +900,16 @@ def grant_access():
     try: 
         if check_list([workspace_id, user_id, role, joined_at]):
             workspace = Workspace.search(workspace_id=workspace_id)
-            org_id = workspace.get_json()['organisation_id']['$oid']
-
-            success = PermissionService.invite_user_to_workspace(
+            org_id = workspace['organisation_id']
+            success, message = PermissionService.invite_user_to_workspace(
                 user_id, org_id, workspace_id, role
             )
-            
             if success:
                 success_add = User_Workspace.create_User_Workspace(workspace_id, user_id, role, joined_at)
                 if success_add:
                     return jsonify({'message': 'User invited to workspace successfully'}), 201
             else:
-                return jsonify({'error': 'Failed to invite user'}), 400
+                return jsonify({'error': f'Failed to invite user: {message}'}), 400
         else :
             return jsonify({
                 'Error' : 'Pleease enter the required fields'
@@ -895,8 +929,7 @@ def remove_access():
     user_id = data.get('user_id')
     if check_list([workspace_id, user_id]):
         workspace = Workspace.search(workspace_id=workspace_id)
-        org_id = workspace.get_json()['organisation_id']['$oid']
-
+        org_id = workspace['organisation_id']
         success = PermissionService.remove_user_from_workspace( user_id, org_id, workspace_id )
         if not success:
             return jsonify({'error': 'Failed to remove user'}), 400
@@ -911,6 +944,7 @@ def remove_access():
 # get all user in a workspace
 @app.route('/workspace/users', methods=['POST'])
 @auth_reqired
+@require_workspace_permission('view_workspace')
 def user_in_workspace():
     data = request.json
     if not data: 
@@ -925,11 +959,12 @@ def user_in_workspace():
 # Update workspace
 @app.route('/workspace/update', methods=['PATCH'])
 @auth_reqired
+@require_workspace_permission('manage_workspace')
 def update_workspace():    
     data = request.json
     if not data: 
         return jsonify({'error': 'Invalid or Missing JSON in request'}), 404
-    user_id = data.get('user_id')
+    user_id = g.user_id
     title=data.get('title') 
     image=data.get('image')
     workspace_id = data.get('workspace_id')
@@ -946,10 +981,11 @@ def update_workspace():
 # Delete a Workspace 
 @app.route('/workspace/delete', methods=['DELETE'])
 @auth_reqired
+@require_workspace_permission('manage_workspace')
 def delete_workspace():
     data=request.json
     if data: 
-        success = Workspace.delete(Workspace_id= data.get('workspace_id'),user_id=data.get('user_id'))
+        success = Workspace.delete(Workspace_id= data.get('workspace_id'),user_id=g.user_id)
         if success:
             return jsonify({'message' : 'Deleted Successfully'}), 200
         return jsonify({'message' : 'Failed to Delete'}), 400
@@ -961,6 +997,7 @@ def delete_workspace():
 #get all board in a workspace
 @app.route('/workspace/boards', methods=['POST'])
 @auth_reqired
+@require_workspace_permission('view_workspace')
 def workspace_board():
     data = request.json
     if not data: 

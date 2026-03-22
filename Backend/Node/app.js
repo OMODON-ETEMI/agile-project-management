@@ -42,7 +42,6 @@ mongoose.connect(uri)
     app.use(cookieParser());
     app.use(authMiddleware)
     app.use(issueRouter);
-    app.use(projectRouter);
     app.use(notificationRouter);
 
 

@@ -53,34 +53,66 @@ class User_Workspace:
         self.joined_at = joined_at
 
 
-    def create_User_Workspace(self):
-        workspace = db.Workspace.find_one({"_id": self.workspace_id})
+    @staticmethod
+    def create_User_Workspace(workspace_id, user_id, role, joined_at):
+        workspace = db.Workspace.find_one({"_id": ObjectId(workspace_id)})
         if not workspace:
             return False
+        
+        print('workspace: ', workspace)
         organisation_id = workspace['organisation_id']
         if not organisation_id:
             return False
+
         result = db.User_Workspace.insert_one({
-            'user_id' : self.user_id,
-            'workspace_id' : self.workspace_id,
-            'organisation_id': self.organisation_id,
-            'role' : self.role,
-            'joined_at': self.joined_at
+            'user_id': ObjectId(user_id),
+            'workspace_id': ObjectId(workspace_id),
+            'organisation_id': organisation_id,
+            'role': role,
+            'joined_at': joined_at
         })
 
         return result.acknowledged
 
-
-    def revoke_User_Workspace(self):
-        result = db.User_Workspace.find_one_and_delete({'workspace_id': self.workspace_id, 'user_id': self.user_id})
+    @staticmethod
+    def revoke_User_Workspace(workspace_id, user_id):
+        result = db.User_Workspace.find_one_and_delete({'workspace_id': ObjectId(workspace_id), 'user_id': ObjectId(user_id)})
         return bool(result)
         
 
 
     def Users_in_Workspace(workspace_id):
-        user_ids = [user['user_id'] for user in db.User_Workspace.find({'workspace_id': ObjectId(workspace_id)}, {'user_id': 1, '_id': 0  })]
-        users = db.Users.find({'_id': {'$in' : user_ids}}, {'password': 0, 'createdAt': 0, 'updatedAt': 0})
-        return serialize_document(list(users))
+       pipeline = [
+        {
+            "$match": {
+                "workspace_id": ObjectId(workspace_id)
+            }
+        },
+        {
+            "$lookup": {
+                "from": "Users",
+                "localField": "user_id",
+                "foreignField": "_id",
+                "as": "user"
+            }
+        },
+        {
+            "$unwind": "$user"
+        },
+        {
+            "$project": {
+                "_id": "$user._id",
+                "username": "$user.username",
+                "email": "$user.email",
+                "avatar": "$user.avatar",
+                "role": "$role",
+                "joined_at": "$joined_at",
+            }
+        }
+    ]
+       users = list(db.User_Workspace.aggregate(pipeline))
+       return serialize_document(users) if users else []
+        
     
     
 class User_Organisation: 
