@@ -247,9 +247,7 @@ class Board:
         print("this is board ID", board_id, "this is user_id", user_id)  
         result = db.Board.delete_one({'_id': ObjectId(board_id), 'user_id' : ObjectId(user_id)})
         if result.deleted_count == 1 :
-            projectcollection = db.get_collection('proojects')
-            taskcollection = db.get_collection('tasks')
-            projectcollection.delete_many({'assigned_board': ObjectId(board_id)})
-            taskcollection.delete_many({'assigned_board': ObjectId(board_id)})
+            taskcollection = db.get_collection('Issues')
+            taskcollection.delete_many({'board_id': ObjectId(board_id)})
             return True
         return False

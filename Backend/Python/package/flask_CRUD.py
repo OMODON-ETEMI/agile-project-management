@@ -389,14 +389,18 @@ def create_board():
     if check_list(info):
         if type == 'Sprint' and (not startDate or not endDate or startDate >= endDate):
             return jsonify({'Error': 'Valid start and end dates are required for a sprint'}), 400
-        board = Board(title, type, user_id, createdAt, workspace_id, image, startDate, endDate)
-        new_board = board.create_board()
-        if new_board:
-            return jsonify({
-                'message': f'Your {new_board["title"]} Board has been created',
-                'board': new_board
-            }), 201
-        return jsonify({'message': 'failed to create board'}), 500
+        try:
+            board = Board(title, type, user_id, createdAt, workspace_id, image, startDate, endDate)
+            new_board = board.create_board()
+            if new_board:
+                return jsonify({
+                    'message': f'Your {new_board["title"]} Board has been created',
+                    'board': new_board
+                }), 201
+            return jsonify({'message': 'failed to create board'}), 500
+        except Exception as e:
+            print("BOARD INIT ERROR:", e)
+            raise
     else :
         return jsonify({
             'message' : "One or more fields are missing"
@@ -413,8 +417,9 @@ def search_title():
             return jsonify(result), 200
         return jsonify({'message': 'No boards found with the given title'}), 404
     elif request.method == 'POST':
-        workspace_id = request.json.get('workspace')
-        board_id = request.json.get('_id')
+        data = request.json or {} 
+        workspace_id = data.get('workspace')
+        board_id = data.get('_id')
         result = None
         if board_id:
             result = Board.board_ID(ID=board_id)
@@ -438,7 +443,6 @@ def update_board():
     data = request.json
     if not data: 
         return jsonify({'error': 'Invalid or Missing JSON in request'}), 404
-    # board_id = data.get('board_id')
     user_id = data.get('user_id')
     start_date = data.get('start_date')
     end_date = data.get('end_date')
