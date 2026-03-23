@@ -1016,7 +1016,7 @@ def workspace_board():
     else : 
         return jsonify({'error': 'No Workspace Selected'}), 400
 
-
+# ------------------------------- IMPORT ----------------------------------#
 @app.route('/issue/import', methods=['POST'])
 @auth_reqired
 def import_file_from_api():
@@ -1036,6 +1036,48 @@ def import_file_from_api():
     except Exception as e:
         return jsonify({'error': 'An unexpected error occurred: ' + str(e)}), 500
 
+# ------------------------------- PERMISSION ----------------------------------#
+@app.route('/permissions/check', methods=['POST'])
+@auth_reqired
+def check_permission():
+    """
+    Check if user has permission
+    Request body: {
+        "permission": "string",
+        "workspace": "Id or slug of workspace",
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    
+    current_user_id = g.user_id
+    permission = data.get('permission')
+    workspace_id =  data.get('workspace_id') 
+    workspace_slug = data.get('slug')
+    
+    if not permission:
+        return jsonify({'error': 'Permission is required'}), 400
+    
+    if not workspace_id and not workspace_slug:
+        return jsonify({'error': 'Workspace ID or slug required'}), 400
+    
+    # Check permission
+    has_perm = PermissionService.has_workspace_permission(
+        current_user_id,
+        workspace_id,
+        permission,
+        workspace_slug
+    )
+    print(f"User {current_user_id} permission check for workspace {workspace_id or workspace_slug} and permission {permission}: {has_perm}")  
+    
+    if not has_perm:
+        return jsonify({
+            'error': 'Insufficient permissions',
+            'required_permission': permission,
+            'context': 'workspace'
+        }), 403
+    return jsonify({
+        'message': f"{permission} granted"
+    }), 200
 
 # ------------------------------- SCRIPTS ----------------------------------#
 @app.route('/backfill_organisation_admin', methods=['POST'])
