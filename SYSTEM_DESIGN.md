@@ -362,15 +362,31 @@ Separated responsibilities
 
 ### Add Load Balancer
 
+```mermaid
+flowchart TD
+    LB["Load Balancer (Nginx/AWS ELB)"]
 
-Load Balancer
+    subgraph Flask_Cluster [Python API Cluster]
+        C1["Flask Instance 1"]
+        C2["Flask Instance 2"]
+        C3["Flask Instance 3"]
+    end
 
-|
+    subgraph Node_Cluster [Node.js Realtime Cluster]
+        D1["Node Instance 1"]
+        D2["Node Instance 2"]
+        D3["Node Instance 3"]
+    end
 
-| | |
-Flask Flask Flask
+    %% Traffic Distribution
+    LB --> C1
+    LB --> C2
+    LB --> C3
 
-Node Node Node
+    LB --> D1
+    LB --> D2
+    LB --> D3
+```
 
 
 This distributes traffic across instances.
@@ -593,4 +609,4 @@ The separation of:
 
 creates a robust and extensible architecture suitable for enterprise-scale project management systems.
 
-The architecture is prepared to scale to millions of users with the addition of load balancin  
+The architecture is prepared to scale to millions of users with the addition of load balancing  
