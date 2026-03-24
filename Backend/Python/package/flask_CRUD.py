@@ -42,7 +42,7 @@ def after_request_logging(response):
     """Runs after every request to log user activity."""
     if 200 <= response.status_code < 300:
         request_data = g.request_data
-        data = request_data.get('json')
+        data = request_data.get('json') if request_data.get('json') else {}
         response_data = response.get_json() if response.is_json else {}
         
         # ------- Initializing the data ------- #
@@ -236,6 +236,7 @@ def create():
 def user():
     user = User
     users = user.user()
+    print("Users:", users)
     return jsonify(users), 200
 
 @app.route('/find', methods=['GET'])

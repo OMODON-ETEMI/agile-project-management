@@ -53,13 +53,13 @@ class User:
         
     @staticmethod
     def user():
-        users = db.Users.find()
+        users = db.Users.find({}, {"password" : 0})
         return serialize_document(list(users))
     
     @staticmethod
     def find_user(id):
         user_id = ObjectId(id)
-        user = db.Users.find_one({'_id': user_id})
+        user = db.Users.find_one({'_id': user_id}, {"password" : 0})
         if user:
             return serialize_document(user)
         return None
@@ -70,7 +70,7 @@ class User:
         for user_info in user_data:
             user_id = user_info["user_id"]
             joined_at = user_info["joined_at"]
-            user = db.Users.find_one({"_id": ObjectId(user_id)})
+            user = db.Users.find_one({"_id": ObjectId(user_id)}, {"password" : 0})
             if user:
                 user_details = {
                     "user_id": user_id,
@@ -85,7 +85,7 @@ class User:
         
     @staticmethod
     def search(name):
-        users = db.Users.find({'username': {'$regex': f'.*{name}*.', '$options': 'i'}})
+        users = db.Users.find({'username': {'$regex': f'.*{name}*.', '$options': 'i'}}, {"password" : 0})
         return serialize_document(list(users))
     
     @staticmethod
