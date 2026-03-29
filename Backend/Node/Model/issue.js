@@ -45,7 +45,16 @@ const IssueSchema = new mongoose.Schema({
   },
   storyPoints: {
     type: Number,
-    default: 0
+    default: 0,
+    validate: {
+      validator: function(value) {
+        if (this.issuetype === "Epic") {
+          return value === 0 || value === null || value === undefined;
+        }
+        return true;
+      },
+      message: 'Epics cannot have story points.'
+    }
   },
   board_id: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -79,8 +88,8 @@ const IssueSchema = new mongoose.Schema({
     index: true,
     validate : {
       validator: function(value){
-        if (dissallowedTypes.includes(this.issuetype)) {
-          return !value; // If issuetype is Task or Story, epic must be null
+        if (["Epic", "Task", "Story"].includes(this.issuetype) && this.issuetype !== "Sub-task") {
+          return !value; 
         }
         return this.issuetype === "Sub-task" ? !!value : true
       },
@@ -109,6 +118,19 @@ const IssueSchema = new mongoose.Schema({
       }
     } 
   },
+  color: {
+    type: String, 
+    default: null,
+    validate: {
+      validator: function(value) {
+        if (this.issuetype !== "Epic" && value){
+          return false
+        }
+        return true;
+      },
+      message: 'Non-epic issues cannot have a custom color.'
+    }
+  },
   dependencies: {
     issues: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Issue' }],
     projects: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Project' }]
@@ -135,18 +157,48 @@ const IssueSchema = new mongoose.Schema({
   assignees: { 
     type: mongoose.Schema.Types.ObjectId, 
     index: true,
-    ref: 'Users' 
+    ref: 'Users',
+    validate: {
+      validator: function(value) {
+        // Epics should not have assignees
+        if (this.issuetype === "Epic") {
+          return value === null || value === undefined;
+        }
+        return true;
+      },
+      message: 'Epics cannot have assignees.'
+    }
  },
   priority: { 
     type: String, 
     enum: ['High', 'Medium', 'Low'], 
-    default: 'Medium' 
+    default: 'Medium',
+    validate: {
+      validator: function(value) {
+        // Epics use default priority and shouldn't be customized in creation
+        if (this.issuetype === "Epic") {
+          return value === 'Medium' || value === null || value === undefined;
+        }
+        return true;
+      },
+      message: 'Epics cannot have a custom priority.'
+    }
   },
   status: { 
     type: String, 
     enum: ['Backlog', 'To Do', 'In Progress', 'Done', 'Cancelled', 'On Hold', 'Review'], 
-    default: 'Backlog' ,
+    default: 'Backlog',
     index: true,
+    validate: {
+      validator: function(value) {
+        // Epics status is forced to Backlog during creation
+        if (this.issuetype === "Epic") {
+          return value === 'Backlog' || value === null || value === undefined;
+        }
+        return true;
+      },
+      message: 'Epics status cannot be changed during creation.'
+    }
   },
   position: {
     type: Number,
@@ -274,8 +326,7 @@ IssueSchema.pre('save', async function (next) {
     try {
       const User = mongoose.connection.db.collection('Users');
       const Board = mongoose.connection.db.collection('Board');
-      const Project = mongoose.connection.db.collection('projects');
-      const Issue = mongoose.connection.db.collection('Issue');
+      const Issues = mongoose.connection.db.collection('Issues');
 
       if (this.isNew) {
       if (!this.reporter) return next(new Error('Reporter is required for new issues.'));
@@ -307,11 +358,14 @@ IssueSchema.pre('save', async function (next) {
         }
       }
 
-      // Check if parent exists only if issuetype is "Sub-task"
-      if (this.issuetype === "Sub-task" && this.parent) {
-          const parentExists = await Issue.findOne({ _id: new mongoose.Types.ObjectId(this.parent) });
-          if (!parentExists) {
-              return next(new Error('Invalid parent: Parent issue does not exist.'));
+      // Sub-tasks must be linked to a Story or Task
+      if (this.issuetype === "Sub-task") {
+        if (!this.parent) {
+          return next(new Error('Sub-tasks must have a parent issue.'));
+        }
+          const parentExists = await Issues.findOne({ _id: new mongoose.Types.ObjectId(this.parent) });
+          if (!parentExists || !['Story', 'Task'].includes(parentExists.issuetype)) {
+              return next(new Error('Invalid parent: Sub-tasks must be linked to a Story or Task.'));
           }
       }
 

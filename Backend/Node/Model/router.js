@@ -60,12 +60,7 @@ issueRouter.post("/issue/search", async (req, res) => {
         message: "search data is required",
       });
     }
-
-    // OPTIONAL: enforce user access to workspace here
-    // await validateWorkspaceAccess(req.user.user_id, queryParams.workspace_id)
-
     const result = await searchIssues(queryParams);
-
     return res.status(200).json({
       message: "Issues retrieved successfully",
       data: result.data,
@@ -344,7 +339,7 @@ issueRouter.delete(
   validateObjectId(["_id"]),
   async (req, res) => {
     try {
-      const deletedIssue = await deleteIssue(req.body);
+      const deletedIssue = await deleteIssue(req.body._id, req.user.user_id); // Pass issueId and actorId
 
       if (!deletedIssue) {
         return res.status(404).json({

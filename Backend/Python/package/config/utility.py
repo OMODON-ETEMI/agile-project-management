@@ -49,12 +49,10 @@ def auth_reqired(f):
     def decorated_function(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
-            print('Authorization header missing or invalid')
             return {'error': 'Authorization is required'}, 401
         
         token = auth_header.split(' ')[1]
         if not token:
-            print('Token is missing')
             return jsonify({'error': 'Token is missing'}), 401
         
         try:
@@ -116,7 +114,6 @@ def require_workspace_permission(permission):
             current_user_id = g.user_id
             workspace_id = kwargs.get('workspace_id') or request.get_json().get('workspace_id') 
             workspace_slug = kwargs.get('slug') or request.get_json().get('slug')
-            
             if not workspace_id and not workspace_slug:
                 return jsonify({'error': 'Workspace ID or slug required'}), 400
             
@@ -127,7 +124,6 @@ def require_workspace_permission(permission):
                 permission,
                 workspace_slug
             )
-            print(f"User {current_user_id} permission check for workspace {workspace_id or workspace_slug} and permission {permission}: {has_perm}")  
             
             if not has_perm:
                 return jsonify({

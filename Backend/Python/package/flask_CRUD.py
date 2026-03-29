@@ -19,6 +19,9 @@ from package.config.permission import PermissionService
 from package.config.import_issue import import_issue
 from package.middleware import check_list
 from package.config.redis import publish_event
+from pymongo.errors import PyMongoError
+from package.config.redis import redis_client
+import time
 import re
 from datetime import datetime, timezone
 
@@ -27,6 +30,7 @@ from datetime import datetime, timezone
 @app.before_request
 def before_request():
     """Runs before every request to log user activity."""
+    g.start_time = time.time()
     g.request_data = {
         'method': request.method,
         'path': request.path,
@@ -40,6 +44,11 @@ def before_request():
 @app.after_request
 def after_request_logging(response):
     """Runs after every request to log user activity."""
+    duration = None
+    if hasattr(g, "start_time"):
+        duration = time.time() - g.start_time
+    else:
+        duration = 0
     if 200 <= response.status_code < 300:
         request_data = g.request_data
         data = request_data.get('json') if request_data.get('json') else {}
@@ -174,8 +183,40 @@ def after_request_logging(response):
             activity.Create_User_Activity_Log()
     return response
 
+
+@app.route("/health")
+def health_check():
+
+    health_status = {
+        "service": "python-backend",
+        "status": "healthy",
+        "mongo": "unknown",
+        "redis": "unknown"
+    }
+
+    # Mongo check
+    try:
+        User.collection.count_documents({})
+        health_status["mongo"] = "connected"
+    except PyMongoError:
+        health_status["mongo"] = "failed"
+        health_status["status"] = "unhealthy"
+
+    # Redis check
+    try:
+        redis_client.ping()
+        health_status["redis"] = "connected"
+    except Exception:
+        health_status["redis"] = "failed"
+        health_status["status"] = "unhealthy"
+
+    status_code = 200 if health_status["status"] == "healthy" else 500
+
+    return jsonify(health_status), status_code
+
 # ------------------- USER ------------------------------- #
 @app.route('/add/user', methods=['POST'])
+@limiter.limit("100 per second")
 def create():
     data = request.json
     if not data: 
@@ -230,16 +271,17 @@ def create():
         }), 404
     
 @app.route('/user', methods=['GET'])
-@limiter.limit("30 per minute")
+@limiter.limit("100 per second")
 @auth_reqired
 @require_either_permission('view_user', 'view_organization')
 def user():
     user = User
     users = user.user()
-    print("Users:", users)
     return jsonify(users), 200
 
 @app.route('/find', methods=['GET'])
+@limiter.limit("1000 per second")
+@auth_reqired
 def find():
     find = User
     id = request.args.get('_id')
@@ -249,6 +291,8 @@ def find():
     return jsonify({'Error': 'User not found'}), 404
 
 @app.route('/users/search', methods=['GET'])
+@limiter.limit("1000 per second")
+@auth_reqired
 def search():
     query = request.args.get('name')
     if check_list([query]):    
@@ -261,6 +305,7 @@ def search():
 
 
 @app.route('/User/me', methods=['POST'])
+@limiter.limit("100 per second")
 @auth_reqired
 def UserData():
     user_id = g.user_id
@@ -274,7 +319,7 @@ def UserData():
         }), 404
          
 @app.route('/login', methods=['POST'])
-@limiter.limit("30 per minute")
+@limiter.limit("100 per second")
 def login():
     user = User
     data = request.json
@@ -308,21 +353,16 @@ def login():
         }), 404
     
 @app.route('/logout', methods=['POST'])
-@limiter.limit("30 per minute")
+@limiter.limit("1000 per second")
 def logout():
     token = request.cookies.get('refresh_token')
-    if not token:
-         return jsonify({
-            'Error' : 'No Token Provided'
-        }), 404
-    result = User.logout(token)
-    if result.get('success'):
-        response = make_response(jsonify({'message': 'Logged out successfully'}))
-        response.delete_cookie('refresh_token', path='/')
-        response.status_code = 200
-        return response
-    else:
-        return jsonify({'Error': 'Logout failed'}), result.get('status_code', 400)
+    data = User.logout(token)
+    response = make_response(jsonify({
+        'message': 'Logged out successfully',
+        'data': data}))
+    response.delete_cookie('refresh_token', path='/')
+    response.status_code = 200
+    return response
     
 @app.route('/auth/refresh', methods=['POST'])
 @limiter.limit("30 per minute")
@@ -381,7 +421,7 @@ def create_board():
     createdAt = datetime.now(timezone.utc)
     endDate = parser.isoparse(data.get('endDate')).astimezone(timezone.utc) if data.get('endDate') else None
     startDate = parser.isoparse(data.get('startDate')).astimezone(timezone.utc) if data.get('startDate') else None
-    workspace_id = data.get('workspace_id')
+    workspace_id = data.get('workspace_id') or data.get('workspace')
     if type not in ['Board', 'Sprint']:
         return jsonify({
             'Error' : 'Invalid board type. Must be one of: Board, Sprint'
@@ -410,7 +450,6 @@ def create_board():
 # search for a board by title or workspace_id 
 @app.route('/board/search', methods=['GET', 'POST'])
 @auth_reqired
-# @require_workspace_permission('view_workspace')
 def search_title():
     if request.method == 'GET' :
         result = Board.search(title=request.args.get('title'))
@@ -418,17 +457,16 @@ def search_title():
             return jsonify(result), 200
         return jsonify({'message': 'No boards found with the given title'}), 404
     elif request.method == 'POST':
-        data = request.json or {} 
-        workspace_id = data.get('workspace')
+        data = request.get_json(silent=True) or {}
+        workspace_id = data.get('workspace_id') or data.get('slug')
         board_id = data.get('_id')
         result = None
         if board_id:
             result = Board.board_ID(ID=board_id)
         elif workspace_id:
-            result = Board.board_in_workspace(workspace_identifier=workspace_id)
+            result = Board.board_in_workspace(workspace_identifier=workspace_id, user_id=g.user_id)
         elif not workspace_id and not board_id:
             return jsonify({"Error" : "Enter a Parameter to search"}), 400
-        
         if result is not None:
             return jsonify(result), 200
         return jsonify({'message': 'Board not found'}), 404
@@ -496,7 +534,7 @@ def create_organisation():
     created_By = g.user_id
     slug = data.get('slug') or Organisation.generate_Unique_slug(title)
     createdAt = datetime.now(timezone.utc)
-    role = data.get('role') or 'Admin'
+    role = data.get('role') or 'admin'
     updatedAt = createdAt
     info = [title, createdAt, created_By]
     if check_list(info):
@@ -505,8 +543,11 @@ def create_organisation():
         if not new_organisation:
             return jsonify({'message' : 'failed to create organisation'}), 500
 
-        user_organisation = User_Organisation( user_id= created_By, organisation_id=new_organisation['_id'], role = role ,  joined_at= createdAt) 
-        user_organisation_response = user_organisation.create_User_Organisation()
+        # Correctly call the static method create_User_Organisation with all required arguments
+        user_organisation_response = User_Organisation.create_User_Organisation(
+            user_id=created_By,
+            organisation_id=new_organisation['_id'],
+            joined_at=createdAt)
         if not user_organisation_response.get('success'):
             print("Failed to add creator as a member.")
             Organisation.delete(organisation_id=new_organisation['_id'], user_id=created_By)
@@ -790,7 +831,7 @@ def delete_organisation():
 # -------------------------- WORKSPACE --------------------------- #
 @app.route('/add/workspace', methods=['POST'])
 @auth_reqired
-@require_organization_permission('manage_workspace')
+@require_organization_permission('manage_workspaces')
 def create_worskapce(): 
     """Create workspace in organization"""
     data = request.json
@@ -800,7 +841,8 @@ def create_worskapce():
     image = data.get('image')
     description = data.get('description')
     created_By = data.get('user_id')
-    role = data.get('role')
+    slug = data.get('slug') or Workspace.generate_Unique_slug(title)
+    role = 'admin'
     createdAt = datetime.now(timezone.utc)
     organisation_id = data.get('organisation_id')
     info = [title, createdAt, organisation_id, created_By]
@@ -808,22 +850,35 @@ def create_worskapce():
         return jsonify({
             'message' : "One or more fields are missing"
         }), 400
-    workspace = Workspace(title, createdAt, image, description, organisation_id, created_By)
+    workspace = Workspace(title, createdAt, image, description, organisation_id, created_By, slug)
     new_workspace = workspace.create_Workspace()
     if not new_workspace:
         return jsonify({'message' : 'failed to create workspace'}), 500
 
     workspace_id = new_workspace['_id']
-    if not check_list([workspace_id, role, created_By, createdAt, role]):
+    if not check_list([workspace_id, role, created_By, createdAt]):
         return jsonify({
             'Error':'Please enter the required fields'
         }), 400
-    access_workspace = User_Workspace(created_By,workspace_id,organisation_id,role,createdAt)
-    success = access_workspace.create_User_Workspace()
+    success = User_Workspace.create_User_Workspace(
+        workspace_id,
+        created_By,
+        role,
+        createdAt
+    )
     if not success:
+        Workspace.delete(workspace_id, created_By)
         return jsonify({
             'message': "Workspace created, but failed to add creator as a member."
-        }), 500
+        }), 400
+    
+    permission_result, message = PermissionService.invite_user_to_workspace(created_By, organisation_id, workspace_id, role)
+    if not permission_result:
+        Workspace.delete(workspace_id, created_By)
+        User_Workspace.revoke_User_Workspace(workspace_id, created_By)
+        return jsonify({
+            'message': f"Permission failed: {message}"
+        }), 400
     
     # ------------ Create default backlog Board ----------------- #
     board = Board(title="Backlog", 

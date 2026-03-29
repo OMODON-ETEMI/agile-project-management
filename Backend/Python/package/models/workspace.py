@@ -147,10 +147,10 @@ class Workspace:
     def delete(Workspace_id,user_id):
         result = db.Workspace.delete_one({'_id': ObjectId(Workspace_id), 'created_By' : ObjectId(user_id)})
         if result.deleted_count == 1 :
-            projectcollection = db.get_collection('proojects')
-            taskcollection = db.get_collection('tasks')
-            projectcollection.delete_many({'assigned_Workspace': ObjectId(Workspace_id)})
-            taskcollection.delete_many({'assigned_Workspace': ObjectId(Workspace_id)})
+            boardcollection = db.get_collection('Board')
+            issuecollection = db.get_collection('Issues')
+            boardcollection.delete_many({'workspace': ObjectId(Workspace_id)})
+            issuecollection.delete_many({'workspace_id': ObjectId(Workspace_id)})
             return True
         return False
         

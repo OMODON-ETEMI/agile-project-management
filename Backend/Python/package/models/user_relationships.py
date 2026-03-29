@@ -58,8 +58,6 @@ class User_Workspace:
         workspace = db.Workspace.find_one({"_id": ObjectId(workspace_id)})
         if not workspace:
             return False
-        
-        print('workspace: ', workspace)
         organisation_id = workspace['organisation_id']
         if not organisation_id:
             return False
@@ -67,7 +65,7 @@ class User_Workspace:
         result = db.User_Workspace.insert_one({
             'user_id': ObjectId(user_id),
             'workspace_id': ObjectId(workspace_id),
-            'organisation_id': organisation_id,
+            'organisation_id': ObjectId(organisation_id),
             'role': role,
             'joined_at': joined_at
         })

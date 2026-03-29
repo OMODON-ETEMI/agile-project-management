@@ -3,38 +3,58 @@ const customParseFormat = require("dayjs/plugin/customParseFormat");
 const { default: mongoose } = require("mongoose");
 const { Issue, generateId } = require("../Model/issue");
 const { emitSocketEvent } = require("../utility/socket");
+const {
+  getNotificationRecipientsAndActor,
+} = require("../utility/dispatchNotification");
+const { createNotification } = require("./notificationController");
 
 dayjs.extend(customParseFormat);
 
-async function createIssue(issueData) {
+async function createIssue(issueData, actorId) {
   try {
-
     issueData.labels ??= [];
     issueData.comments ??= [];
     issueData.storyPoints ??= 0;
     issueData.priority ??= "Medium";
+    issueData.assignees === 'unassigned' ? issueData.assignees = null : issueData.assignees
 
     if (issueData.issuetype === "Epic") {
       issueData.board_id = null;
       issueData.position = 0;
     } else {
-
       const position = await Issue.countDocuments({
         board_id: issueData.board_id,
-        issuetype: { $ne: "Epic" }
+        issuetype: { $ne: "Epic" },
       });
 
       issueData.position = position + 1;
     }
-
     const issue = new Issue(issueData);
-
     await issue.save();
+    const user_id = new mongoose.Types.ObjectId(issue.reporter);
+    const { recipientIds, actor } = await getNotificationRecipientsAndActor(
+      issue,
+      user_id,
+    );
 
-    emitSocketEvent("IssueCreated", issue);
+    await createNotification({
+      recipientId: recipientIds,
+      type: "issue_created",
+      title: "Issue created",
+      message: `Issue ${issue.issueID} - "${issue.title}" has been created by ${actor.name}.`,
+      actor: actor,
+      context: {
+        entityId: issue._id,
+        entityType: "issue",
+        entityTitle: issue.title,
+        workspaceId: issue.workspace_id,
+      },
+      actionUrl: `/issue/${issue._id}`, // Example URL
+    });
+
+    emitSocketEvent("IssueCreated", issue, issue.reporter);
 
     return issue;
-
   } catch (error) {
     throw new Error(`Issue creation failed: ${error.message}`);
   }
@@ -64,7 +84,6 @@ async function searchIssues(queryParams) {
     if (_id) {
       mongoQuery._id = new mongoose.Types.ObjectId(_id);
     }
-
 
     if (workspace_id) {
       mongoQuery.workspace_id = new mongoose.Types.ObjectId(workspace_id);
@@ -150,7 +169,7 @@ async function searchIssues(queryParams) {
       [sortBy]: sortOrder === "asc" ? 1 : -1,
     };
 
-    if(mongoQuery.board_id){
+    if (mongoQuery.board_id) {
       sortOptions.position = 1;
     }
 
@@ -160,10 +179,7 @@ async function searchIssues(queryParams) {
     const skip = (Number(page) - 1) * Number(limit);
 
     const [issues, total] = await Promise.all([
-      Issue.find(mongoQuery)
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(Number(limit)),
+      Issue.find(mongoQuery).sort(sortOptions).skip(skip).limit(Number(limit)),
       Issue.countDocuments(mongoQuery),
     ]);
 
@@ -193,22 +209,22 @@ async function getEpics(workspace_id) {
 }
 
 async function updateIssueMetadata({ issueId, updates }, user_id) {
-const allowedUpdates = new Set([
-  "title",
-  "description",
-  "storyPoints",
-  "status",
-  "board_id",
-  "assignees",
-  "priority",
-  "parent",
-  "epic",
-  "dueDate",
-  "labels",
-  "board_id",
-  "color",
-  "resolutionId"
-]);
+  const allowedUpdates = new Set([
+    "title",
+    "description",
+    "storyPoints",
+    "status",
+    "board_id",
+    "assignees",
+    "priority",
+    "parent",
+    "epic",
+    "dueDate",
+    "labels",
+    "board_id",
+    "color",
+    "resolutionId",
+  ]);
 
   const sanitizedUpdates = Object.fromEntries(
     Object.entries(updates).filter(([key]) => allowedUpdates.has(key)),
@@ -246,12 +262,31 @@ const allowedUpdates = new Set([
 
   const updatedIssue = await issue.save({ validateModifiedOnly: true });
 
+  const { recipientIds, actor } = await getNotificationRecipientsAndActor(
+    issue,
+    user_id,
+  );
+
+  await createNotification({
+    recipientId: recipientIds,
+    type: "issue_updated",
+    title: "Issue Updated",
+    message: `Issue ${issue.issueID} - "${issue.title}" has been updated by ${actor.name}.`,
+    actor: actor,
+    context: {
+      entityId: issue._id,
+      entityType: "issue",
+      entityTitle: issue.title,
+      workspaceId: issue.workspace_id,
+    },
+    actionUrl: `/issue/${issue._id}`, // Example URL
+  });
+
   emitSocketEvent("IssueUpdated", issue, updatedIssue.workspace_id);
   return issue;
 }
 
 async function addComment(issueId, userId, body) {
-
   const issue = await Issue.findById(issueId);
 
   if (!issue) {
@@ -261,7 +296,7 @@ async function addComment(issueId, userId, body) {
   issue.comments.push({
     author: userId,
     body,
-    createdAt: new Date()
+    createdAt: new Date(),
   });
 
   await issue.save();
@@ -304,6 +339,27 @@ async function transitionIssueStatus({ issueId, status }, user_id) {
 
     await session.commitTransaction();
     session.endSession();
+
+    // Prepare notification for status change
+    const { recipientIds, actor } = await getNotificationRecipientsAndActor(
+      issue,
+      user_id,
+    );
+
+    await createNotification({
+      recipientId: recipientIds,
+      type: "status_change",
+      title: "Issue Status Changed",
+      message: `Issue ${issue.issueID} - "${issue.title}" status changed from ${issue.updateHistory[issue.updateHistory.length - 1].oldValue} to ${issue.updateHistory[issue.updateHistory.length - 1].newValue} by ${actor.name}.`,
+      actor: actor,
+      context: {
+        entityId: issue._id,
+        entityType: "issue",
+        entityTitle: issue.title,
+        workspaceId: issue.workspace_id,
+      },
+      actionUrl: `/issue/${issue._id}`, // Example URL
+    });
 
     emitSocketEvent("IssueStatusChanged", issue, issue.workspace_id);
     return issue;
@@ -506,12 +562,31 @@ async function importIssue(issueData, addedData) {
   }
 }
 
-async function deleteIssue({ _id }) {
+async function deleteIssue(issueId, actorId) {
   try {
-    const deletedIssue = await Issue.findOneAndDelete({ _id });
+    const deletedIssue = await Issue.findOneAndDelete({
+      _id: new mongoose.Types.ObjectId(issueId),
+    });
 
     if (deletedIssue) {
-      emitSocketEvent("IssueDeleted", deletedIssue);
+      const { recipientIds, actor } = await getNotificationRecipientsAndActor(
+        deletedIssue,
+        actorId,
+      );
+
+      await createNotification({
+        recipientId: recipientIds,
+        type: "issue_deleted",
+        title: "Issue Deleted",
+        message: `Issue ${deletedIssue.issueID} - "${deletedIssue.title}" has been deleted by ${actor.name}.`,
+        actor: actor,
+        context: {
+          entityId: deletedIssue._id,
+          entityType: "issue",
+          entityTitle: deletedIssue.title,
+          workspaceId: deletedIssue.workspace_id,
+        },
+      });
     }
 
     return deletedIssue;

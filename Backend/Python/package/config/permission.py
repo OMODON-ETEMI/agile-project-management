@@ -67,33 +67,63 @@ WORKSPACE_PERMISSIONS = {
 
 class PermissionService:
     
-    def invite_user_to_organization( user_id, org_id, role="Member"):
-        """Add user to organization with specified role"""
+    def invite_user_to_organization( user_id, org_id, role="member"):
+        """
+        Add user to organization with specified role, or update their role if they already exist.
+        Returns True on success, False on failure.
+        """
+        user_obj_id = ObjectId(user_id)
+        org_obj_id = ObjectId(org_id)
         
-        result = db.user_permissions.update_one(
-        {"userId": ObjectId(user_id)},
-        {
-            "$addToSet": {
-                "organizations": {
-                    "organizationId": ObjectId(org_id),
-                    "role": role,
-                    "workspaces": [],
-                    "joinedAt": datetime.now()
+        # 1. Check if the user is already a member of the organization and what their current role is
+        existing_permission_doc = db.user_permissions.find_one(
+            {"userId": user_obj_id, "organizations.organizationId": org_obj_id},
+            {"organizations.$": 1} # Project only the matching organization element
+        )
+
+        if existing_permission_doc:
+            # User is already in the organization
+            current_org_entry = existing_permission_doc['organizations'][0]
+            current_role = current_org_entry['role']
+
+            if current_role == role:
+                # Role is already the same, no update needed
+                return True
+            else:
+                # Role is different, update the role
+                update_result = db.user_permissions.update_one(
+                    {"userId": user_obj_id, "organizations.organizationId": org_obj_id},
+                    {"$set": {"organizations.$.role": role, "updatedAt": datetime.now()}}
+                )
+                return update_result.modified_count > 0
+        else:
+            # User is not in the organization, add them
+            # First, try to add the organization to an existing user_permissions document
+            add_to_set_result = db.user_permissions.update_one(
+                {"userId": user_obj_id},
+                {
+                    "$addToSet": {
+                        "organizations": {
+                            "organizationId": org_obj_id,
+                            "role": role,
+                            "workspaces": [],
+                            "joinedAt": datetime.now()
+                        }
+                    },
+                    "$set": {"updatedAt": datetime.now()}
                 }
-            },
-            "$set": {"updatedAt": datetime.now()}
-        }
-    )
-        
-        print('result: ', result.matched_count)
-    
-        # If user doesn't exist, create them
-        if result.matched_count == 0:
-            db.user_permissions.insert_one({
-                "userId": ObjectId(user_id),
+            )
+            
+            if add_to_set_result.modified_count > 0:
+                return True
+            
+            # If $addToSet didn't modify anything, it means the user_permissions document
+            # for this userId doesn't exist yet. So, insert a new one.
+            insert_result = db.user_permissions.insert_one({
+                "userId": user_obj_id,
                 "organizations": [
                     {
-                        "organizationId": ObjectId(org_id),
+                        "organizationId": org_obj_id,
                         "role": role,
                         "workspaces": [],
                         "joinedAt": datetime.now()
@@ -102,9 +132,7 @@ class PermissionService:
                 "createdAt": datetime.now(),
                 "updatedAt": datetime.now()
             })
-            return True
-        
-        if result.modified_count > 0: return True
+            return insert_result.acknowledged
         
 
         
@@ -116,45 +144,89 @@ class PermissionService:
             {"$pull": {"organizations": {"organizationId": ObjectId(org_id)}}}    )
         return result
     
-    def invite_user_to_workspace(user_id, org_id, workspace_id, role="Viewer"):
+    def invite_user_to_workspace(user_id, org_id, workspace_id, role="viewer"):
         """Add user to specific workspace"""
+        user_obj_id = ObjectId(user_id)
+        org_obj_id = ObjectId(org_id)
+        ws_obj_id = ObjectId(workspace_id)
         
-                # Check if user is in organization first
         user_in_org = db.User_Organisation.find_one({
-            "user_id": ObjectId(user_id),
-            "organisation_id": ObjectId(org_id)
+            "user_id": user_obj_id,
+            "organisation_id": org_obj_id
         })
         
         if not user_in_org:
-            return False ,"User must be in organization first"
+            return False ,"User must be in organization"
         
         user_in_workspace = db.User_Workspace.find_one({
-            "user_id": ObjectId(user_id),
-            "workspace_id": ObjectId(workspace_id)
+            "user_id": user_obj_id,
+            "workspace_id": ws_obj_id
         })
         
-        if user_in_workspace:
-            return False ,"User already in this workspace"
+        if not user_in_workspace:
+            return False ,"User must be in this workspace"
         
-        # Add workspace to user's organization
-        db.user_permissions.update_one(
+        
+        existing_permission_doc = db.user_permissions.find_one(
             {
-                "userId": ObjectId(user_id),
-                "organizations.organizationId": ObjectId(org_id)
+                "userId": user_obj_id, 
+                "organizations.organizationId": org_obj_id
             },
-            {
-                "$push": {
-                    "organizations.$.workspaces": {
-                        "workspaceId": ObjectId(workspace_id),
-                        "role": role,
-                        "joinedAt": datetime.now()
-                    }
-                },
-                "$set": {"updatedAt": datetime.now()}
-            }
+            {"organizations.$": 1}
         )
+
+        if existing_permission_doc:
+            org_entry = existing_permission_doc['organizations'][0]
+            workspaces = org_entry.get('workspaces', [])
+            
+            # Look for this specific workspace in the array
+            existing_ws = next((ws for ws in workspaces if ws['workspaceId'] == ws_obj_id), None)
+
+            if existing_ws:
+                if existing_ws['role'] == role:
+                    # Role is identical, do nothing and return success
+                    return True, "successfully added"
+                else:
+                    # Role is different, update the nested role using array_filters
+                    result = db.user_permissions.update_one(
+                        {
+                            "userId": user_obj_id,
+                            "organizations.organizationId": org_obj_id,
+                            "organizations.workspaces.workspaceId": ws_obj_id
+                        },
+                        {
+                            "$set": {
+                                "organizations.$[org].workspaces.$[ws].role": role,
+                                "updatedAt": datetime.now()
+                            }
+                        },
+                        array_filters=[
+                            {"org.organizationId": org_obj_id},
+                            {"ws.workspaceId": ws_obj_id}
+                        ]
+                    )
+                    return result.modified_count > 0, 'successfully added'
+            else:
+                # Workspace not in the list, push a new one
+                db.user_permissions.update_one(
+                    {
+                        "userId": user_obj_id,
+                        "organizations.organizationId": org_obj_id
+                    },
+                    {
+                        "$push": {
+                            "organizations.$.workspaces": {
+                                "workspaceId": ws_obj_id,
+                                "role": role,
+                                "joinedAt": datetime.now()
+                            }
+                        },
+                        "$set": {"updatedAt": datetime.now()}
+                    }
+                )
+                return True, 'successfully added'
         
-        return True, 'successfully added'
+        return False, "User permissions document not found"
     
     def remove_user_from_workspace(user_id, org_id, workspace_id):
         """Remove user from specific workspace"""
@@ -260,8 +332,6 @@ class PermissionService:
         # print('Checking org permission for user_id:', user_id, 'org_id:', org_id, 'org_slug:', org_slug, 'permission:', permission)
         user_role = PermissionService.get_user_permissions(user_id, organisation_id=org_id, organisation_slug=org_slug)
         
-        print('User permissions for org:', user_role)
-        
         if not user_role:
             return False
         
@@ -271,7 +341,6 @@ class PermissionService:
     def has_workspace_permission(user_id, workspace_id=None, permission=None, workspace_slug=None):
         """Check if user has permission in workspace"""
         user_perms = PermissionService.get_user_permissions(user_id, workspace_id=workspace_id, workspace_slug=workspace_slug)
-        print('User permission',user_perms)
         if not user_perms:
             return False
         
