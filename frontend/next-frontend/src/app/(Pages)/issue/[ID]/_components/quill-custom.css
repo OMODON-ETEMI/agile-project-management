@@ -1,0 +1,17 @@
+/* Make Quill icons smaller */
+.ql-toolbar button svg {
+    width: 14px; /* Smaller size */
+    height: 14px;
+  }
+  
+  /* Remove the border line below the toolbar */
+  .ql-toolbar {
+    border-bottom: none !important;
+  }
+  
+  /* Optional: Adjust padding/margins between toolbar and text area */
+  .ql-container {
+    border-top: none !important;
+    padding-top: 0 !important;
+  }
+  
