@@ -41,6 +41,7 @@ Before you begin, ensure you have the following installed:
 git clone [https://github.com/OMODON-ETEMI/agile-project-management.git](https://github.com/OMODON-ETEMI/agile-project-management.git)
 
 cd agile-project-management
+```
 
 2. Environment Configuration
 Create a .env file in the root directory. You will need to define the following variables (refer to the individual service folders for specific .env.example files):
@@ -56,7 +57,7 @@ REDIS_PORT
 🐳 Method A: Run with Docker (Recommended)
 The easiest way to spin up the infrastructure (Flask, Node, and Redis) is using Docker Compose.
 
-Bash
+```Bash
 # Build and start all backend containers
 docker-compose up --build
 
@@ -67,14 +68,16 @@ Flask API: http://localhost:5000
 Node/Socket API: http://localhost:4000
 
 Redis: localhost:6379
+```
 
 Start the Frontend:
 Once the containers are up, open a new terminal:
 
-Bash
+```Bash
 cd frontend
 npm install
 npm run dev
+```
 💻 Method B: Manual Local Setup
 If you prefer to run the services individually:
 
@@ -82,28 +85,33 @@ If you prefer to run the services individually:
 Ensure a local Redis instance is running on port 6379.
 
 2. Backend (Flask Setup)
-Bash
+```Bash
 cd Python
 pip install -r requirements.txt
 python app.py
+```
 
 3. Backend (Node Setup)
-Bash
+```Bash
 cd Node
 npm install
 npm run dev
+```
 
 4. Frontend
-Bash
+```Bash
 cd frontend
 npm install
 npm run dev
+```
 
+### Testing
 🧪 Running Tests
 To ensure the integrity of the Auth and Board logic, run the Pytest suite:
-Bash
+```Bash
 cd Python
 pytest
+```
 
 ### One final tip:
 Since your `docker.yml` uses the filename `Dockerfile.dev`, make sure your actual files in the `./Python` and `./Node` folders are named exactly `Dockerfile.dev`. 
