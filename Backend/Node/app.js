@@ -1,3 +1,4 @@
+require('dotenv').config();
 const mongoose = require('mongoose');
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -7,7 +8,6 @@ const cors = require('cors');
 const { issueRouter, projectRouter, notificationRouter } = require('./Model/router');
 const { initSocket } = require('./utility/socket')
 const subscriber = require('./utility/subscriber')
-const dotenv =  require('dotenv');
 const { authMiddleware } = require('./utility/auth.js');
 
 const app = express();
@@ -16,15 +16,15 @@ const server = http.createServer(app)
 
 const io = new Server(server, {
   cors: {
-    origin: 'http://localhost:3000',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     methods: ['GET', 'POST', 'PATCH', 'OPTIONS', 'PUT', 'DELETE']
   }
 });
 
-const uri = 'mongodb://host.docker.internal:27017/mydatabase';
+const uri = process.env.MONGODB_URI || 'mongodb://host.docker.internal:27017/mydatabase';
 
 const corsOptions = {
-  origin: 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   optionsSuccessStatus: 200
 }
 
@@ -50,7 +50,6 @@ mongoose.connect(uri)
   res.json({ message: `Hello ${req.user.username}` });
 });
 
-    dotenv.config();
     subscriber.start();
     io.on('connection', (socket) => {
       console.log('A client connected:', socket.id);

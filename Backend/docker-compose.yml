@@ -8,8 +8,6 @@ services:
     container_name: python-services
     ports:
       - "5000:5000"
-    volumes:
-      - ./Python:/app
     depends_on:
       - redis
     environment:
@@ -23,9 +21,6 @@ services:
     container_name: node-services
     ports:
         - "4000:4000"
-    volumes:
-        - ./Node:/app
-        - /app/node_modules 
     depends_on:
         - redis
     environment:
@@ -35,5 +30,3 @@ services:
   redis:
     image: redis:alpine
     container_name: redis
-    ports:
-      - "6379:6379"
