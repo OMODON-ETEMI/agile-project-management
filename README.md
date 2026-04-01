@@ -1,63 +1,111 @@
 # 🚀 Agile Project Management Platform
 
-A full-stack, enterprise-grade **Agile project management solution** for tracking sprints, managing issues, and fostering team collaboration — designed with scalability, security, and developer experience in mind.
+A full-stack, enterprise-grade **Agile project management solution** for tracking sprints, managing issues, and fostering team collaboration, designed with scalability, security, and developer experience in mind.
 
 ## 🖥 Tech Stack
 
 ### Frontend
 - **Framework**: Nextjs (TypeScript)
 - **UI**: TailwindCSS, Chadcn UI
-- **State Management**: Redux Toolkit
-- **Build Tooling**: Vite / Webpack
 - **API Integration**: Axios, React Query
 
 ### Backend
-- **Primary Backend**: Node.js (Express)
-- **Secondary Backend Services**: Python (Flask)
-- **Database**: MongoDB, MySQL  
+- **Primary API & Logic**: Python (Flask)
+- **Real-time & Notifications**: Node.js (Express + Socket.io)
+- **Database**: MongoDB
 - **Caching & Performance**: Redis (Rate Limiting, Caching)
-- **Cloud Infrastructure**: AWS (EC2, S3)  
-- **Containerization & Orchestration**: Docker, Kubernetes  
-- **CI/CD**: GitHub Actions  
-- **Security**: JWT Authentication, Role-Based Access Control, Secure Coding Practices  
+- **Containerization**: Docker & Docker Compose
+- **Security**: JWT Authentication, Role-Based Access Control, Secure Coding Practices, Token and Authentication Management, 
 
 ---
 
 ## ✨ Core Features
 - **Board & Sprint Management** — Organize work into sprints, track progress, and visualize workflows  
 - **Issue Tracking** — Create, assign, and prioritize issues with real-time updates  
-- **User Management** — Role-based permissions for admins, developers, and stakeholders  
-- **Work Log & History** — Maintain a timeline of changes and contributions  
-- **Cloud Deployment Ready** — Easily scalable to meet growing demands  
-- **AI-Resilient Code Philosophy** — Built for long-term maintainability  
+- **User Management** — Role-based permissions for Admins, Developers, and Viewers.
+- **Work Log & History** — Maintain a transparent timeline of all changes and contributions. 
+- **Cloud Deployment Ready** — Fully containerized for seamless deployment to platforms like Render, AWS, or DigitalOcean.
 
 ---
 
 ## 📦 Installation & Setup
 
+### Prerequisites
+Before you begin, ensure you have the following installed:
+* [Git](https://git-scm.com/)
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Recommended)
+* [Node.js](https://nodejs.org/) & [Python 3.x](https://www.python.org/) (If running manually)
+
 ```bash
 # Clone the repository
-git clone https://github.com/OMODON-ETEMI/agile-project-management.git
+git clone [https://github.com/OMODON-ETEMI/agile-project-management.git](https://github.com/OMODON-ETEMI/agile-project-management.git)
 
-# Navigate into the project directory
 cd agile-project-management
-```
-Backend (FLASK Setup)
-```bash
-cd backend-python
-pip install -r requirements.txt
-python app.py
-```
-Backend (Node Setup)
-```bash
-cd backend
+
+2. Environment Configuration
+Create a .env file in the root directory. You will need to define the following variables (refer to the individual service folders for specific .env.example files):
+
+MONGO_URI
+
+JWT_SECRET_KEY
+
+REDIS_HOST
+
+REDIS_PORT
+
+🐳 Method A: Run with Docker (Recommended)
+The easiest way to spin up the infrastructure (Flask, Node, and Redis) is using Docker Compose.
+
+Bash
+# Build and start all backend containers
+docker-compose up --build
+
+# To run in detached mode (background):
+docker-compose up -d --build
+Flask API: http://localhost:5000
+
+Node/Socket API: http://localhost:4000
+
+Redis: localhost:6379
+
+Start the Frontend:
+Once the containers are up, open a new terminal:
+
+Bash
+cd frontend
 npm install
 npm run dev
-```
-Frontend 
-```bash
+💻 Method B: Manual Local Setup
+If you prefer to run the services individually:
+
+1. Start Redis
+Ensure a local Redis instance is running on port 6379.
+
+2. Backend (Flask Setup)
+Bash
+cd Python
+pip install -r requirements.txt
+python app.py
+
+3. Backend (Node Setup)
+Bash
+cd Node
+npm install
+npm run dev
+
+4. Frontend
+Bash
 cd frontend
 npm install
 npm run dev
 
+🧪 Running Tests
+To ensure the integrity of the Auth and Board logic, run the Pytest suite:
+Bash
+cd Python
+pytest
 
+### One final tip:
+Since your `docker.yml` uses the filename `Dockerfile.dev`, make sure your actual files in the `./Python` and `./Node` folders are named exactly `Dockerfile.dev`. 
+
+If you decide to deploy to **Render** using Docker, Render usually looks for a file named just `Dockerfile`. You might want to create a standard `Dockerfile` for production in each folder, or tell Render specifically to use the `.dev` one in the settings!
