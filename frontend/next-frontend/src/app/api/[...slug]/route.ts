@@ -5,6 +5,10 @@ import { cache } from "react";
  * Extracts the Cookie string from a NextRequest to forward to the backend
  */
 
+const pythonBackendUrl = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || "http://127.0.0.1:5000/";
+const nodeBackendUrl = process.env.NEXT_PUBLIC_NODE_BACKEND_URL || "http://127.0.0.1:4000/";
+
+
 function getCookiesFromSource(req: NextRequest | AxiosInstance): string {
   if (!req) return "";
 
@@ -42,7 +46,7 @@ export const getServerAccessToken = async (
   refreshTokenPromise = (async () => {
     const cookieHeader = getCookiesFromSource(req);
     try {
-      const res = await fetch("http://127.0.0.1:5000/auth/server/refresh", {
+      const res = await fetch(`${pythonBackendUrl}auth/server/refresh`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -80,9 +84,9 @@ async function handler(
 
   if (params.slug?.[0] === "node") {
     const nodeSlug = params.slug.slice(1).join("/");
-    backendUrl = `http://127.0.0.1:4000/${nodeSlug}${queryString}`;
+    backendUrl = `${nodeBackendUrl}${nodeSlug}${queryString}`;
   } else {
-    backendUrl = `http://127.0.0.1:5000/${slugPath}${queryString}`;
+    backendUrl = `${pythonBackendUrl}${slugPath}${queryString}`;
   }
 
   try {

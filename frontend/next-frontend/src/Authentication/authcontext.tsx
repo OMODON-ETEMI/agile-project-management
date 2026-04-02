@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useMemo } from 'react'
 import { Credential, LoginData, Organisation, User, Workspace } from '../helpers/type';
 import { UserData } from './user';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import api from '../lib/api/csrAPi';
 import { handleAxiosError, handleAxiosSuccess } from '../helpers/response-handler';
 import { useUserQuery } from '../lib/api/reactQuery';
