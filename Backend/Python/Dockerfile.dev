@@ -25,7 +25,7 @@ ENV FLASK_ENV=development
 ENV PYTHONUNBUFFERED=1
 
 # Start the app with gunicorn for better performance in production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "package:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "run:app"]
 # For development, you might want to use Flask's built-in server instead:
 # CMD ["flask", "run", "--host=0.0.0.0"]
 

@@ -17,4 +17,6 @@ COPY . .
 EXPOSE 4000
 
 #Start the dev server
-CMD ["npm", "run", "dev"]
+# CMD ["npm", "run", "dev"]
+# Start the production server
+CMD ["npm", "start"]
