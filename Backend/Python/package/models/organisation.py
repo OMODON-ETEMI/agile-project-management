@@ -147,7 +147,13 @@ class Organisation:
         user_org = db.User_Organisation.find({'user_id': ObjectId(user_id)})
         org_ids = [relation['organisation_id'] for relation in user_org]
         organisations = db.organisation.find({'_id': {'$in': org_ids}})
-        last_accessed_document = User_Activity.get_last_accessed_entities(user_id=user_id, entity_type='organisation', limit= db.organisation.count_documents({}))
+        total_orgs = db.organisation.count_documents({})
+        safe_limit = max(1, total_orgs)
+        last_accessed_document = User_Activity.get_last_accessed_entities(
+            user_id=user_id, 
+            entity_type='organisation', 
+            limit= safe_limit
+            )
         organisations_list = []
         for organisation in organisations:
             organisation_id = organisation.get('_id')
