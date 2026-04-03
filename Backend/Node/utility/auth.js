@@ -1,6 +1,7 @@
 const jwt = require ("jsonwebtoken");
 
 function authMiddleware(req, res, next) {
+  console.log("Auth middleware called for path:", req);
   if(!req.headers.Authorization){
     return res.status(401).json({error: "Unauthorized"})
   }
