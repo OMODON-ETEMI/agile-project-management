@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { notificationApi } from "@/src/lib/api/notification";
 import { Notification } from "../helpers/type";
 import { useWebSocket } from "../helpers/websocket-context";
+import { useClientApi } from "../lib/api/csrAPi";
 
 interface UseNotificationsOptions {
-  recipientId: string;
+  recipientId?: string;
   limit?: number;
   unreadOnly?: boolean;
   types?: string[];
@@ -20,6 +21,7 @@ interface UseNotificationsOptions {
 export function useNotifications(options: UseNotificationsOptions) {
   const { recipientId, limit = 20, unreadOnly = false, types, enable = true, enableRealtime = true } = options;
 
+  const api = useClientApi();
   // 1. Access the global socket and the toast setter from Context
   // We don't need 'realtimeNotification' state here, only the setter to trigger the Toast.
   const { socket, setRealtimeNotification } = useWebSocket();
@@ -39,7 +41,7 @@ export function useNotifications(options: UseNotificationsOptions) {
   } = useQuery({
     queryKey: QUERY_KEY,
     queryFn: () =>
-      notificationApi.getNotifications({ recipientId, limit, offset: 0, unreadOnly, types }),
+      notificationApi.getNotifications(api, { recipientId, limit, offset: 0, unreadOnly, types }),
     staleTime: 60000, // Keep data fresh for 60 seconds
     enabled: !!recipientId && enable,  // Only fetch if we have a user ID and enable is true
   });
@@ -80,7 +82,7 @@ export function useNotifications(options: UseNotificationsOptions) {
 
   // Mutation: Mark Single as Read
   const markAsReadMutation = useMutation({
-    mutationFn: notificationApi.markAsRead,
+    mutationFn: (id: string) => notificationApi.markAsRead(api, id),
     onMutate: async (notificationId) => {
       return updateCache((old: any) => {
         if (!old?.data?.notifications) return old;
@@ -120,7 +122,7 @@ export function useNotifications(options: UseNotificationsOptions) {
 
   // Mutation: Mark All as Read
   const markAllAsReadMutation = useMutation<any, Error, void>({
-    mutationFn: () => notificationApi.markAllAsRead(),
+    mutationFn: () => notificationApi.markAllAsRead(api),
     onMutate: async () => {
       return updateCache((old: any) => {
         if (!old?.data) return old;
@@ -144,7 +146,7 @@ export function useNotifications(options: UseNotificationsOptions) {
 
   // Mutation: Delete Notification
   const deleteNotificationMutation = useMutation({
-    mutationFn: notificationApi.deleteNotification,
+    mutationFn: (id: string) => notificationApi.deleteNotification(api, id),
     onMutate: async (notificationId) => {
       return updateCache((old: any) => {
         if (!old?.data) return old;
@@ -169,7 +171,7 @@ export function useNotifications(options: UseNotificationsOptions) {
 
   // Mutation: Clear Read
   const clearReadMutation = useMutation({
-    mutationFn: notificationApi.clearRead,
+    mutationFn: (ids: string | string[]) => notificationApi.clearRead(api, ids),
     onSuccess, // No optimistic update needed here, just refetch
   });
 

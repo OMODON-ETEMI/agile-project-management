@@ -5,6 +5,6 @@ import { useNotifications } from "@/src/hooks/useNotification";
 
 export function GlobalNotificationListner() {
     const { currentUser } = useAuth();
-    useNotifications({ recipientId: currentUser?.user_id || "", enableRealtime: true });
+    useNotifications(currentUser ? { recipientId: currentUser.user_id, enableRealtime: true } : { enableRealtime: false } );
     return null;
 }

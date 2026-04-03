@@ -10,14 +10,9 @@ import { ThemeProvider } from "../components/shared/theme-provider";
 import { WebSocketProvider } from "../helpers/websocket-context";
 import { GlobalNotificationListner } from "../components/providers/global";
 import { WorkspaceProvider } from "../Authentication/workspacecontext";
-
-
-
+import { headers } from "next/headers";
 
 dotenv.config();
-
-
-
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -47,17 +42,19 @@ export const metadata: Metadata = {
   ]
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+    const headerList = await headers();
+    const token = headerList.get('x-internal-AT');
   return (
     <html lang="en" suppressHydrationWarning className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} antialiased`}>
       <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable}`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem={true} disableTransitionOnChange>
           <Providers>
-            <AuthProvider>
+            <AuthProvider initialToken={token}>
               <WorkspaceProvider>
                 <WebSocketProvider>
                 <GlobalNotificationListner />

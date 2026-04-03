@@ -31,6 +31,7 @@ export const useUserQuery = () =>
   useQuery<User>({
     queryKey: ["currentUser"],
     queryFn: async () => {
+      console.log("Fetching current user data in React Query...");
       const token = await getAccessToken()
       if (!token) return null
       return await UserData(token)

@@ -45,6 +45,7 @@ export const getServerAccessToken = async (
 
   refreshTokenPromise = (async () => {
     const cookieHeader = getCookiesFromSource(req);
+    console.log("Attempting to refresh token with cookies: ", cookieHeader);
     try {
       const res = await fetch(`${pythonBackendUrl}auth/server/refresh`, {
         method: "POST",
@@ -62,6 +63,9 @@ export const getServerAccessToken = async (
         return data;
       }
       const data = await res.json();
+      if (data.headers.get("Set-Cookie")) {
+        console.log("Received new Set-Cookie header during token refresh");
+      }
       return data.token;
     } catch (error) {
       return null;

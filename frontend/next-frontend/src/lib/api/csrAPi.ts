@@ -1,19 +1,38 @@
+"use client";
 
+import { useAuth } from "@/src/Authentication/authcontext";
+import { useMemo } from "react";
 import axios from "axios";
-import { getAccessToken } from "../auth-util";
+import { handleAxiosError } from "@/src/helpers/response-handler";
 
-const clientApi = axios.create({
-  baseURL: "/api", // Next.js proxy
-  withCredentials: true,
-});
+export function useClientApi() {
+  const { initialToken, Logout } = useAuth(); 
 
+  const api = useMemo(() => {
+    const client = axios.create({
+      baseURL: "/api",
+      withCredentials: true,
+    });
 
- clientApi.interceptors.request.use(async (config) => {
-    const token = await getAccessToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config
-  })
+    client.interceptors.request.use((config) => {
+      if (initialToken) {
+        config.headers.Authorization = `Bearer ${initialToken}`;
+      }
+      return config;
+    });
 
-export default clientApi;
+    client.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        if (error.response?.status === 401) {
+          handleAxiosError(error);
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return client;
+  }, [initialToken]); 
+
+  return api;
+}

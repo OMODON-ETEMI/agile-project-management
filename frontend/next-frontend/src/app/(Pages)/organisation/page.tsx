@@ -10,9 +10,12 @@ import { NotFoundError, UnauthorizedError } from "@/src/components/ui/error";
 
 export default async function OrganizationsPage() {
 
+  console.log("Fetching organisations for SSR...");
   const api = await createSSRApi()
   const response = await allOrganisation(api)
+  console.log("SSR organisations response: ", response);
   if(response.error){
+    if (response.error.response.status === 404) {
     return (
       <UnauthorizedError
         message={response.error.response.data.error || "Failed to fetch organisations"}
@@ -20,6 +23,15 @@ export default async function OrganizationsPage() {
         actionRoute="/organisation"
       />
     );
+  } else if (response.error.response.status === 401) {
+    return (
+      <NotFoundError
+        message={response.error.response.data.error || "Unauthorized access to organisations"}
+        actionLabel="Go Back"
+        actionRoute="/organisation"
+      />
+    );
+  }
   }
   const organisationData: Organisation[] = response || [];
 

@@ -22,14 +22,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<Socket>();
   
   // Use http:// for Socket.io initialization
-  const WS_URL = "http://localhost:4000"; 
+  const WS_URL = process.env.NEXT_PUBLIC_NODE_BACKEND_URL || "http://localhost:4000"; 
 
   const { currentUser } = useAuth();
   useEffect(() => {
     // 1. Initialize the socket only once on mount
     const socket = io(WS_URL, { 
       transports: ["websocket"],
-      autoConnect: true,
+      autoConnect: false,
     });
 
     socket.on("connect", () => {
