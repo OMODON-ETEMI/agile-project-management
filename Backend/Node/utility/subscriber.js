@@ -1,7 +1,8 @@
 const redis = require('redis');
 const eventBus = require('./eventBus');
 
-const client = redis.createClient({url: "redis://redis:6379"});
+const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+const client = redis.createClient({url: REDIS_URL});
 
 module.exports.start = async () => {
     await client.connect()
