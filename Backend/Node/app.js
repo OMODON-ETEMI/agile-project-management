@@ -35,14 +35,20 @@ mongoose
     console.log("Connected to MongoDB");
     initSocket(io);
 
-    app.get("/", (req, res) => {
-      res.send("Hello world");
-    });
-
     app.use(cors(corsOptions));
     app.use(express.json());
     app.use(cookieParser());
+
+    app.use((req, res, next) => {
+      console.log("--- RAW INCOMING REQUEST ---");
+      console.log("Path:", req.path);
+      console.log("Auth Header:", req.headers.authorization || "MISSING");
+      next();
+    });
     app.use(authMiddleware);
+    app.get("/", (req, res) => {
+      res.send("Hello world");
+    });
     app.use(issueRouter);
     app.use(notificationRouter);
 
@@ -78,7 +84,7 @@ mongoose
     console.error("Error connecting to MongoDB:", err);
   });
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
