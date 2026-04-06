@@ -1,15 +1,11 @@
 const jwt = require ("jsonwebtoken");
 
 function authMiddleware(req, res, next) {
-  console.log("Headers:", req.headers);
   const authHeader = req.headers.authorization;
-  console.log("Authorization Header:", authHeader);
   if(!authHeader){
     return res.status(401).json({error: "Unauthorized"})
   }
-  const token = authHeader.split(" ")[1] 
-
-
+  const token = authHeader.split(" ")[1]
   if (!token) return res.status(401).json({ error: "Missing token" });
 
   try {

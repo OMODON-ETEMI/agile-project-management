@@ -38,13 +38,6 @@ mongoose
     app.use(cors(corsOptions));
     app.use(express.json());
     app.use(cookieParser());
-
-    app.use((req, res, next) => {
-      console.log("--- RAW INCOMING REQUEST ---");
-      console.log("Path:", req.path);
-      console.log("Auth Header:", req.headers.authorization || "MISSING");
-      next();
-    });
     app.use(authMiddleware);
     app.get("/", (req, res) => {
       res.send("Hello world");
@@ -53,7 +46,6 @@ mongoose
     app.use(notificationRouter);
 
     app.get("/protected", (req, res) => {
-      // req.user is available here
       res.json({ message: `Hello ${req.user.username}` });
     });
 
