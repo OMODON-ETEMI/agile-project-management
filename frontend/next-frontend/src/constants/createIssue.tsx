@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, use, useMemo } from "react";
-import { Issue, ISSUE_TYPES, IssueType, priority, Priority, priorityList, Status, StatusData, User } from "../helpers/type";
+import { useState, useRef, useEffect, useMemo } from "react"; // Removed 'use' since it's not utilized
+import { Issue, ISSUE_TYPES, IssueType, priority, Priority, priorityList, Status, StatusData, User, Board } from "../helpers/type"; // Added Board import
 import { useAuth } from "../Authentication/authcontext";
 import Icon from "../helpers/icon";
 import useIssues from "../hooks/useIssues";
@@ -97,11 +97,12 @@ interface AvatarProps {
 
 interface JiraCreateIssueModalProps {
   users: User[];
-  epics: Issue[];
+  epics?: Issue[];
+  boards?: Board[]; // Added new prop for boards
   /** Optional callback fired after the modal closes */
   onClose?: () => void;
   /** Optional callback fired after an issue is successfully created */
-  onSubmit?: (data: Partial<Issue>) => void;
+  onSubmit?: (data: Partial<Issue>) => Promise<any> | void;
 }
 
 // --- Dropdown ---
@@ -287,11 +288,7 @@ function CheckboxField({ checked, onChange, label }: CheckboxFieldProps) {
   );
 }
 
-// --- Main Modal ---
-// Self-contained: manages its own open/close state.
-// Usage:  <JiraCreateIssueModal />
-// With callbacks: <JiraCreateIssueModal onClose={fn} onSubmit={fn} />
-export default function JiraCreateIssueModal({ epics, users, onClose, onSubmit }: JiraCreateIssueModalProps) {
+export default function JiraCreateIssueModal({ epics, users, boards, onClose, onSubmit }: JiraCreateIssueModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [epic, setEpic] = useState("");
   const [issuetype, setIssueType] = useState<IssueType>('Story');
@@ -301,20 +298,25 @@ export default function JiraCreateIssueModal({ epics, users, onClose, onSubmit }
   const [description, setDescription] = useState("");
   const [reporter, setReporter] = useState("");
   const [assignees, setAssignees] = useState("unassigned");
-  const [priority, setPriority] = useState<Priority>('Medium')
+  const [priority, setPriority] = useState<Priority>('Medium');
   const [board_id, setBoard_id] = useState("current");
   const [storyPoints, setStoryPoints] = useState<number>();
   const [parentIssue, setParentIssue] = useState("");
   const [linkReason, setLinkReason] = useState("Relates");
   const [createAnother, setCreateAnother] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+
+  useEffect(() => {
+    if (boards && boards.length > 0 && board_id === "current") setBoard_id(boards[0]._id);
+  }, [boards, board_id]);
 
   const isEpic = issuetype === "Epic";
   const isSubtask = issuetype === "Sub-task";
 
   const { currentUser } = useAuth();
-  const { issues } = useIssues({ workspaceId: epics[0].workspace_id})
+  const { issues } = useIssues({ workspaceId: epics ? epics[0]?.workspace_id : undefined, enable: !!epics });
 
   const issueTypeOptions = ISSUE_TYPES.map(t => ({ 
     value: t,
@@ -332,12 +334,20 @@ export default function JiraCreateIssueModal({ epics, users, onClose, onSubmit }
 
   const Epics = useMemo(() => [
     { value: "", label: "None" },
-    ...epics.map(e => ({ 
+    ...(epics || []).map(e => ({ 
       value: e._id as string, 
       label: e.title 
     }))
   ], [epics]);
 
+  // Memoized options for the Sprint dropdown
+  const boardOptions = useMemo(() => [
+    { value: "", label: "Select Sprint" }, 
+    ...(boards || []).map(b => ({
+      value: b._id,
+      label: b.title
+    }))
+  ], [boards]);
 
 const assigneeOptions = useMemo(() => {
   return [
@@ -395,21 +405,24 @@ const assigneeOptions = useMemo(() => {
       e.linkReason = "A link reason is required for sub-tasks.";
     }
 
+    if (!isEpic && !board_id) { // Sprint is compulsory for non-epic issues
+      e.board_id = "Sprint is required.";
+    }
+
     if (!reporter) e.reporter = "Reporter is required.";
     return e;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const e = validate();
     if (Object.keys(e).length > 0) { setErrors(e); return; }
     setErrors({});
-    setSubmitted(true);
-    setTimeout(() => {
-      setSubmitted(false);
-      
+    setIsSubmitting(true);
+
+    try {
       const finalColor = isEpic ? (color || EPIC_COLORS[Math.floor(Math.random() * EPIC_COLORS.length)]) : undefined;
 
-      const data: Partial<Issue> = isEpic ? {
+      const data: Partial<Issue> = isEpic ? { // For Epics, board_id should be undefined
         issuetype, title, description, reporter, board_id: undefined, 
         status: "Backlog", priority: "Medium", storyPoints: 0, assignees: undefined,
         color: finalColor
@@ -419,17 +432,26 @@ const assigneeOptions = useMemo(() => {
         linkedIssues: isSubtask ? [{ issue: parentIssue as any, type: linkReason as any }] : [],
         issuetype, status, title, description, reporter, assignees, priority, board_id, storyPoints
       };
-
-      onSubmit?.(data);
-
+      await onSubmit?.(data);
+      
+      setSubmitted(true);
+      setIsSubmitting(false);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      setSubmitted(false);
       if (!createAnother) {
         setIsOpen(false);
         onClose?.();
       } else {
-        setTitle(""); setDescription(""); setStoryPoints(undefined);
+        // Reset form for next entry
+        setTitle(""); setDescription(""); setStoryPoints(0);
         setAssignees("unassigned"); setPriority('Medium'); setColor("");
+        setBoard_id(boards && boards.length > 0 ? boards[0]._id : "current");
       }
-    }, 1200);
+    } catch (err) {
+      setIsSubmitting(false);
+      // On error, the modal remains open and onClose is not triggered
+    }
   };
 
   const handleClose = () => { setErrors({}); setIsOpen(false); onClose?.(); };
@@ -581,6 +603,17 @@ const assigneeOptions = useMemo(() => {
               <p style={{ margin: "4px 0 0", fontSize: "12px", color: colors.textMuted, lineHeight: "1.4" }}>
                 This is the initial status upon creation.
               </p>
+            </div>
+          )}
+
+          {/* Sprint */}
+          {!isEpic && (
+            <div style={{ marginBottom: "16px" }}>
+              <FieldLabel required>Sprint</FieldLabel>
+              <Dropdown value={board_id} onChange={setBoard_id} options={boardOptions} />
+              {errors.board_id && (
+                <p style={{ margin: "4px 0 0", fontSize: "12px", color: colors.danger }}>{errors.board_id}</p>
+              )}
             </div>
           )}
 
@@ -765,25 +798,26 @@ const assigneeOptions = useMemo(() => {
             </button>
             <button
               type="button"
+              disabled={isSubmitting || submitted}
               onClick={handleSubmit}
               style={{
                 height: "32px", padding: "0 12px",
                 border: "1px solid hsl(var(--primary))",
-                backgroundColor: submitted ? "#22c55e" : "hsl(var(--primary))",
+                backgroundColor: submitted ? "#22c55e" : (isSubmitting ? "hsl(var(--muted))" : "hsl(var(--primary))"),
                 borderRadius: "3px", cursor: "pointer",
                 fontSize: "14px",
                 fontWeight: "600", color: "var(--primary-foreground)",
-                transition: "background-color 0.2s",
+                transition: "all 0.2s",
                 display: "flex", alignItems: "center", gap: "6px",
               }}
               onMouseEnter={e => {
-                if (!submitted) e.currentTarget.style.backgroundColor = colors.bgHover;
+                if (!submitted && !isSubmitting) e.currentTarget.style.backgroundColor = colors.bgHover;
               }}
               onMouseLeave={e => {
-                if (!submitted) e.currentTarget.style.backgroundColor = colors.bg;
+                if (!submitted && !isSubmitting) e.currentTarget.style.backgroundColor = "hsl(var(--primary))";
               }}
             >
-              {submitted ? (
+              {isSubmitting ? "Creating..." : submitted ? (
                 <>
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                     <path d="M3 8l3.5 3.5 6.5-7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />

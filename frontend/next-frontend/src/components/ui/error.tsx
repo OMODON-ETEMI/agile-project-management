@@ -56,7 +56,7 @@ const errorConfig = {
     actionLabel: "Create New Task",
     actionRoute: "/",
     color: "text-yellow-500",
-    illustration: "/illustrations/empty-tasks.svg",
+    illustration: "https://images.unsplash.com/photo-1579548122080-c35fd6820ecb?q=80&w=2070&auto=format&fit=crop",
     imageAlt: "Empty Task Board Illustration"
   }
 };

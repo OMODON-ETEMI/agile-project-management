@@ -5,7 +5,7 @@ import { UserData } from './user';
 import { useRouter } from 'next/navigation';
 import { handleAxiosError, handleAxiosSuccess } from '../helpers/response-handler';
 import { LoadingSekeleton } from '../components/ui/skeleton';
-import { createClientApi } from '../lib/api/apiClient';
+import { api, setApiToken } from '../lib/api/csrAPi';
 
 
 interface AuthContextType {
@@ -19,7 +19,7 @@ interface AuthContextType {
     setIsLoading: (loading: boolean) => void;
     Login: (credential: LoginData) => Promise<string | null>;
     Logout: () => void;
-    Signin: (credential: Omit<Credential, 'image' | 'title'>) => void;
+    Signin: (credential: any) => Promise<null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,13 +31,10 @@ export const AuthProvider = ({ children, initialToken }: { children: ReactNode; 
     const [isLoading, setIsLoading] = useState<boolean>(false)
     const router = useRouter()
 
-    // Create a stable callback for the API client to handle auth failures
-    const handleUnauthorized = () => {
-        setCurrentUser(null);
-        router.push("/user/signup");
-    };
-
-    const api = useMemo(() => createClientApi(initialToken, handleUnauthorized), [initialToken]);
+    useMemo(() => {
+        console.log("Initial token in AuthProvider: ", initialToken);
+        setApiToken(initialToken);
+    }, [initialToken]);
 
     useEffect(() => {
         const fetchUserData = async (initialToken: string) => {
@@ -58,24 +55,11 @@ export const AuthProvider = ({ children, initialToken }: { children: ReactNode; 
     }, [initialToken]);
 
 
-    // const refreshAuthToken = async (): Promise<string | null> => {
-    //     try {
-    //         console.log("Attempting to refresh auth token from authentication provider...");
-    //         const authToken = (await api.post("/auth/refresh")).data;
-    //         const userData: User = await UserData(authToken.token);
-    //         setCurrentUser(userData)
-    //         return authToken.token;
-    //     } catch (error) {
-    //         handleAxiosError(error)
-    //         router.push("/user/signup");
-    //         return null;
-    //     }
-    // };
-
     async function Login(credential: LoginData) {
         try {
             const user = (await api.post("/login", credential)).data
             const { token } = user
+            setApiToken(token);
             const userData: User = await UserData(token);
             setCurrentUser(userData)
             const urlSearchParams = new URLSearchParams(window.location.search);
@@ -91,6 +75,7 @@ export const AuthProvider = ({ children, initialToken }: { children: ReactNode; 
 
     async function Logout() {
         try {
+            setIsLoading(true)
             const response = await fetch("/api/logout", {
                 method: "POST",
                 credentials: "include",
@@ -100,6 +85,8 @@ export const AuthProvider = ({ children, initialToken }: { children: ReactNode; 
             handleAxiosSuccess(data)
         } catch (error: any) {
             handleAxiosError(error)
+        } finally {
+            setIsLoading(false)
         }
     }
 
@@ -107,6 +94,7 @@ export const AuthProvider = ({ children, initialToken }: { children: ReactNode; 
         try {
             const user = await api.post("/add/user", credential)
             const { token } = user.data
+            setApiToken(token);
             const userData: User = await UserData(token);
             setCurrentUser(userData)
             const urlSearchParams = new URLSearchParams(window.location.search);

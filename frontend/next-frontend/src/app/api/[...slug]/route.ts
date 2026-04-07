@@ -5,9 +5,10 @@ import { cache } from "react";
  * Extracts the Cookie string from a NextRequest to forward to the backend
  */
 
-const pythonBackendUrl = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || "http://127.0.0.1:5000/";
-const nodeBackendUrl = process.env.NEXT_PUBLIC_NODE_BACKEND_URL || "http://127.0.0.1:4000/";
-
+const pythonBackendUrl =
+  process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || "http://127.0.0.1:5000/";
+const nodeBackendUrl =
+  process.env.NEXT_PUBLIC_NODE_BACKEND_URL || "http://127.0.0.1:4000/";
 
 function getCookiesFromSource(req: NextRequest | AxiosInstance): string {
   if (!req) return "";
@@ -69,10 +70,10 @@ export const getServerAccessToken = async (
       return data.token;
     } catch (error) {
       return null;
-    } finally{
+    } finally {
       refreshTokenPromise = null;
     }
-  })()
+  })();
   return refreshTokenPromise;
 };
 

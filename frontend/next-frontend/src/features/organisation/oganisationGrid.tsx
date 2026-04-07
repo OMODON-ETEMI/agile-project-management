@@ -51,7 +51,7 @@ export const OrganisationGridItem = ({ organisation }: OrganisationGridItemProps
           border-t border-gray-100">
           {/* Member count or other metadata */}
           <span className="text-xs text-gray-500">
-            Created {new Date(organisation.createdAt.$date).toLocaleDateString('en-US', {
+            Created {new Date(organisation.createdAt).toLocaleDateString('en-US', {
                 weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
             })}
           </span>

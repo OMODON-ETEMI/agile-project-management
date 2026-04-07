@@ -7,15 +7,16 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Inbox } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { CardHeader, CardContent } from "@/components/ui/card";
-import { useAuth } from '@/src/Authentication/authcontext';
 import { AssignedToMeModal, RecentOrganisationsInline, RecentWorkInline } from './navigationContent';
 import Button from '@/src/components/ui/button';
-import { CreateIssueForm } from '@/src/components/ui/createIssue';
 import { recentOrganisation } from '@/src/lib/api/organisation';
 import { Organisation } from '@/src/helpers/type';
+import { useRecentWorkspaces, useWorkspaceExtras } from '@/src/hooks/useWorkspace';
+import JiraCreateIssueModal from '@/src/constants/createIssue';
+import useIssues from '@/src/hooks/useIssues';
 
 
 // Comprehensive Type Definitions
@@ -45,8 +46,11 @@ interface NavigationMenuItem {
 const NavigationDropdown: React.FC = () => {
   const [activeMenuItem, setActiveMenuItem] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<NavigationAction | null>(null);
-  const { workspaces } = useAuth()
   const [organisation, setOrganisation] = useState<Organisation[] | null>(null);
+  const { data: workspaces, isLoading } = useRecentWorkspaces(true);
+  const { epicData: epics, createIssueAsync} = useIssues({ workspaceId: workspaces ? workspaces[0]._id : undefined, enable: !!workspaces });
+  const { users } = useWorkspaceExtras(workspaces ? workspaces[0]._id : undefined, { users: true, boards: false });
+  const { boards } = useWorkspaceExtras(workspaces ? workspaces[0]._id : undefined, { users: false, boards: true });
 
   useEffect(() => {
     const fetchRecentOrganisation = async () => {
@@ -60,8 +64,6 @@ const NavigationDropdown: React.FC = () => {
 
     fetchRecentOrganisation();
   },[])
-
-
   
 const menuItems: NavigationMenuItem[] = [
   {
@@ -201,13 +203,7 @@ const menuItems: NavigationMenuItem[] = [
       ))}
       {/* Create Button */}
       {workspaces && (
-        <CreateIssueForm 
-          workspace={workspaces}
-          definedUI={
-            <Button variant='primary' className="ml-4 bg-[#0052CC] hover:bg-[#0747A6] text-white text-sm">
-              Create
-            </Button>
-          }/> 
+        <JiraCreateIssueModal epics={epics} users={users} boards={boards} onSubmit={(data) => createIssueAsync({...data, workspace_id: workspaces ? workspaces[0]._id : undefined})} onClose={() => {}}/>
     )}
     </nav>
   );

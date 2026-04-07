@@ -1,26 +1,3 @@
-// import { Organisation } from "@/src/helpers/type";
-// import Link from "next/link";
-
-// interface OrganisationListItemProps{
-//     organisation: Organisation
-// }
-
-// export const OrganizationListItem = ({ organisation }: OrganisationListItemProps) => {
-//   return (
-//     <Link href={`/organisation/${organisation.slug}`}>
-//     <div className="w-full h-[50px] border rounded-md flex items-center bg-white p-6 shadow-sm transition-shadow hover:shadow-md ">
-//         <div 
-//           className="w-8 h-8 rounded-full"
-//           style={{ }}
-//         />
-//         <span className="ml-4 text-sm text-gray-900">{organisation.title}</span>
-//         <span className="ml-auto text-sm text-gray-500">
-//           {organisation.workspace_count} Workspace{Number(organisation.workspace_count) > 1 ? "s" : ""}
-//         </span>
-//     </div>
-//     </Link>
-//   );
-// };
 
 import { Organisation } from "@/src/helpers/type";
 import Link from "next/link";

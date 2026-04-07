@@ -295,6 +295,7 @@ export function useIssues(options: UseIssuesOptions = {}) {
 
     // Mutations
     createIssue: createMutation.mutate,
+    createIssueAsync: createMutation.mutateAsync,
     addComment: addCommentMutation.mutate,
     updateIssue: updateMutation.mutate,
     deleteIssue: deleteMutation.mutate,

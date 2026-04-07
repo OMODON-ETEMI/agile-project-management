@@ -66,14 +66,6 @@ export default function NoOrganisation() {
                 >
                     <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                         <CreateOrganizationModal />
-                        <Button
-                            size="lg"
-                            className="h-14 px-10 text-lg font-semibold bg-white text-blue-600 hover:bg-slate-100 border-0 shadow-lg hover:shadow-white/25 transition-all duration-300"
-                        >
-                            <Plus className="w-5 h-5 mr-2" />
-                            Create Organization
-                            <ArrowRight className="w-5 h-5 ml-2" />
-                        </Button>
                     </motion.div>
                     <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                         <Button

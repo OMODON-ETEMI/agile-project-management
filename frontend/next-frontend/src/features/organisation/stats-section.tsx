@@ -4,7 +4,7 @@ import { motion } from "framer-motion"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Building2, Activity, Users } from "lucide-react"
-import type { Organisation } from "@/app/organization/page"
+import { Organisation } from "@/src/helpers/type"
 
 interface StatsSectionProps {
   organizations: Organisation[]

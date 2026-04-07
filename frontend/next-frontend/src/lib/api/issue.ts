@@ -1,6 +1,6 @@
 import { Issue } from "@/src/helpers/type";
-import api from "./csrAPi";
 import { handleAxiosError, handleAxiosSuccess } from "@/src/helpers/response-handler";
+import { api } from "./csrAPi";
 
 export async function createIssue(credential: Partial<Issue>) {
     try {

@@ -9,11 +9,8 @@ import { NotFoundError, UnauthorizedError } from "@/src/components/ui/error";
 
 
 export default async function OrganizationsPage() {
-
-  console.log("Fetching organisations for SSR...");
   const api = await createSSRApi()
   const response = await allOrganisation(api)
-  console.log("SSR organisations response: ", response);
   if(response.error){
     if (response.error.response.status === 404) {
     return (

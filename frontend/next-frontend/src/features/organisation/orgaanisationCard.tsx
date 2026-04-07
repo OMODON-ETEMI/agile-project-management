@@ -16,7 +16,9 @@ export const OrganizationCard = ({ organisation }: OrganisationCardProps) => {
         <p className="text-sm text-gray-500 mt-1">{} members</p>
         {organisation.lastAccessed && (
           <p className="text-sm text-gray-500 mt-1">
-            Last accessed: {organisation.lastAccessed}
+            Last accessed: {(organisation.lastAccessed) ? new Date(organisation.lastAccessed.timestamp).toLocaleDateString('en-US', {
+              weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+            }) : "N/A"}
           </p>
         )}
       </div>

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { notificationApi } from "@/src/lib/api/notification";
 import { Notification } from "../helpers/type";
 import { useWebSocket } from "../helpers/websocket-context";
-import { useClientApi } from "../lib/api/csrAPi";
+import { api } from "../lib/api/csrAPi";
 
 interface UseNotificationsOptions {
   recipientId?: string;
@@ -21,7 +21,6 @@ interface UseNotificationsOptions {
 export function useNotifications(options: UseNotificationsOptions) {
   const { recipientId, limit = 20, unreadOnly = false, types, enable = true, enableRealtime = true } = options;
 
-  const api = useClientApi();
   // 1. Access the global socket and the toast setter from Context
   // We don't need 'realtimeNotification' state here, only the setter to trigger the Toast.
   const { socket, setRealtimeNotification } = useWebSocket();

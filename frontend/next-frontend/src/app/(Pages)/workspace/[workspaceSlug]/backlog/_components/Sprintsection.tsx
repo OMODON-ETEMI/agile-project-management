@@ -6,7 +6,6 @@ import { BoardWithIssues, Issue, User } from "@/src/helpers/type";
 import { formatMongoDate } from "@/src/helpers/date";
 import JiraCreateIssueModal from "@/src/constants/createIssue";
 import useIssues from "@/src/hooks/useIssues";
-import { color } from "framer-motion";
 
 
 // ---------------------------------------------------------------------------
@@ -39,7 +38,7 @@ export default function SprintSection({
   const [isExpanded, setIsExpanded] = useState(
     new Date(sprint.startDate) >= new Date() ? true : false
   );
-  const{ createIssue } = useIssues()
+  const{ createIssueAsync } = useIssues()
 
   const isActive =
     new Date(sprint.startDate) <= new Date() && new Date(sprint.endDate) >= new Date();
@@ -139,7 +138,7 @@ export default function SprintSection({
           )}
         </div>
       )}
-      <JiraCreateIssueModal epics={epics} users={users} onSubmit={(data) => createIssue({...data, workspace_id: sprint.workspace, board_id: sprint._id})} onClose={() => setIsOpen(false)}/>
+      <JiraCreateIssueModal epics={epics} users={users} onSubmit={(data) => createIssueAsync({...data, workspace_id: sprint.workspace, board_id: sprint._id})} onClose={() => setIsOpen(false)}/>
     </div>
   );
 }

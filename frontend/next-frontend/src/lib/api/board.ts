@@ -1,6 +1,6 @@
 import { Board } from "@/src/helpers/type";
-import api from "./csrAPi";
 import { handleAxiosError, handleAxiosSuccess } from "@/src/helpers/response-handler";
+import { api } from "./csrAPi";
 
 
 export async function createBoard(credential: Partial<Board>) {

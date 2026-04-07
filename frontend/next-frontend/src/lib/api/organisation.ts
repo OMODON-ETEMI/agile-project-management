@@ -1,14 +1,14 @@
 import { Organisation } from "@/src/helpers/type";
-import clientApi from "./csrAPi";
 import {
   handleAxiosError,
   handleAxiosSuccess,
 } from "@/src/helpers/response-handler";
 import { AxiosInstance } from "axios";
+import { api } from "./csrAPi";
 
 export async function createOrganisation(credential: any) {
   try {
-    const response = await clientApi.post("/add/organisation", credential);
+    const response = await api.post("/add/organisation", credential);
     handleAxiosSuccess(response.data.message);
     return response.data.organisation;
   } catch (error: any) {
@@ -31,7 +31,7 @@ export async function allOrganisation(Api?: AxiosInstance) {
       }
     } else {
       try {
-        const response = await clientApi.get("/all/organisation", { params: {} });
+        const response = await api.get("/all/organisation", { params: {} });
         return response.data;
       } catch (error) {
         handleAxiosError(error);
@@ -41,7 +41,7 @@ export async function allOrganisation(Api?: AxiosInstance) {
 
 export async function recentOrganisation() {
   try {
-    const response = await clientApi.post("/recent/organisation", {});
+    const response = await api.post("/recent/organisation", {});
     return response.data;
   } catch (error) {
     handleAxiosError(error);
@@ -50,7 +50,7 @@ export async function recentOrganisation() {
 
 export async function searchOrganisation(params: Partial<Organisation>) {
   try {
-    const response = await clientApi.post(`/organisation/search`, params);
+    const response = await api.post(`/organisation/search`, params);
     return response.data;
   } catch (error) {
     handleAxiosError(error);
@@ -59,7 +59,7 @@ export async function searchOrganisation(params: Partial<Organisation>) {
 
 export async function OrganisationMembers(organisation_id: string) {
   try {
-    const response = await clientApi.get(`/organisation/users`, {
+    const response = await api.get(`/organisation/users`, {
       params: { organisation_id },
     });
     return response.data.results;
@@ -73,7 +73,7 @@ export async function SearchOrgansationMembers(
   query: string
 ) {
   try {
-    const response = await clientApi.get(`/organisation/users`, {
+    const response = await api.get(`/organisation/users`, {
       params: { organisation_id, query },
     });
     return response.data.results;
@@ -84,7 +84,7 @@ export async function SearchOrgansationMembers(
 
 export async function updateOrganisation(update: Partial<Organisation>) {
   try {
-    const response = (await clientApi.patch("/organisation/update", update)).data;
+    const response = (await api.patch("/organisation/update", update)).data;
     handleAxiosSuccess(response.message);
     return response.data;
   } catch (error) {
@@ -100,8 +100,8 @@ export async function updateUserOrganisation(
   try {
     let response;
     type === "invite"
-      ? (response = (await clientApi.post("/organizations/invite", update)).data)
-      : (response = (await clientApi.post("/organizations/remove", update)).data);
+      ? (response = (await api.post("/organizations/invite", update)).data)
+      : (response = (await api.post("/organizations/remove", update)).data);
     handleAxiosSuccess(response.message);
     return response.data;
   } catch (error) {
@@ -112,7 +112,7 @@ export async function updateUserOrganisation(
 
 export async function updateUserRoleOrganisation( update: Record<string, string>) {
   try {
-    const response = (await clientApi.post("/organisation/role/update", update)).data;
+    const response = (await api.post("/organisation/role/update", update)).data;
     handleAxiosSuccess(response.message);
     return response.data;
   } catch (error) {
@@ -124,7 +124,7 @@ export async function updateUserRoleOrganisation( update: Record<string, string>
 export async function deleteOrganisation(data: string) {
   try {
     const response = (
-      await clientApi.delete("/organisation/delete", {
+      await api.delete("/organisation/delete", {
         data: { organisation_id: data },
       })
     ).data;

@@ -30,12 +30,12 @@ import type { Workspace } from "@/src/helpers/type";
  */
 const workspaceKeys = {
   all: ["workspaces"] as const,
-  byId: (id?: string) => ["workspace", id] as const,
-  byOrg: (orgId?: string) => ["workspace-org", orgId] as const,
-  search: (slug?: string) => ["workspace-search", slug] as const,
-  recent: () => ["workspace-recent"] as const,
-  users: (workspaceId?: string) => ["workspace-users", workspaceId] as const,
-  boards: (workspaceId?: string) => ["workspace-boards", workspaceId] as const,
+  byId: (id?: string) => ["workspaces", "detail", id] as const,
+  byOrg: (orgId?: string) => ["workspaces", "org", orgId] as const,
+  search: (slug?: string) => ["workspaces", "search", slug] as const,
+  recent: () => ["workspaces", "recent"] as const,
+  users: (workspaceId?: string) => ["workspaces", "users", workspaceId] as const,
+  boards: (workspaceId?: string) => ["workspaces", "boards", workspaceId] as const,
 };
 
 /**

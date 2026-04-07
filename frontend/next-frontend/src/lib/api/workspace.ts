@@ -4,9 +4,8 @@ import {
   handleAxiosSuccess,
 } from "@/src/helpers/response-handler";
 import { AxiosInstance } from "axios";
-import { useClientApi } from "./csrAPi";
+import { api } from "./csrAPi";
 
-const api = useClientApi()
 export async function createWorkspace(credential: Object) {
   try {
     const response = (await api.post("/add/workspace", credential)).data;

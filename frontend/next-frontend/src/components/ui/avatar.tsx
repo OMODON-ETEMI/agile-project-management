@@ -39,7 +39,7 @@ const AvatarComponent: React.FC<AvatarProps> = ({user, className, maxShown}: Ava
               ) : (
                 <div className="flex items-center justify-center w-full h-full bg-gray-300 rounded-full">
                   <span className="text-gray-600 font-medium">
-                    {user.first_name[0].toUpperCase()}{user.last_name[0].toUpperCase()}
+                    {user.firstname[0].toUpperCase()}{user.lastname[0].toUpperCase()}
                   </span>
                 </div>
               )}
@@ -61,7 +61,7 @@ const AvatarComponent: React.FC<AvatarProps> = ({user, className, maxShown}: Ava
     <Avatar className={`h-6 w-6 cursor-pointer ring-offset-2 hover:ring-2 hover:ring-slate-200 ${className}`}>
       <AvatarImage src={user.image.imageFullUrl} alt={`${user.image.imageUserName} ${user.image.user}`} />
       <AvatarFallback className="bg-indigo-100 text-indigo-600 text-xs">
-        {user.first_name[0].toUpperCase()}{user.last_name[0].toUpperCase()}
+        {user.firstname[0].toUpperCase()}{user.lastname[0].toUpperCase()}
       </AvatarFallback>
     </Avatar>
   </> 

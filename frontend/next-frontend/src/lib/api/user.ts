@@ -1,6 +1,6 @@
 import { User } from "@/src/helpers/type";
-import api from "./csrAPi";
 import { handleAxiosError } from "@/src/helpers/response-handler";
+import { api } from "./csrAPi";
 
 // 1. Get all users (or general user data)
 export async function getAllUsers(): Promise<User[]> {

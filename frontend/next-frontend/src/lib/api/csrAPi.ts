@@ -1,38 +1,28 @@
 "use client";
 
-import { useAuth } from "@/src/Authentication/authcontext";
-import { useMemo } from "react";
 import axios from "axios";
-import { handleAxiosError } from "@/src/helpers/response-handler";
 
-export function useClientApi() {
-  const { initialToken, Logout } = useAuth(); 
+export const api = axios.create({
+  baseURL: "/api",
+  withCredentials: true,
+});
 
-  const api = useMemo(() => {
-    const client = axios.create({
-      baseURL: "/api",
-      withCredentials: true,
-    });
+export const setApiToken = (token: string | null) => {
+  if (token) {
+    api.defaults.headers.Authorization = `Bearer ${token}`;
+  } else {
+    delete api.defaults.headers.Authorization;
+  }
+};
 
-    client.interceptors.request.use((config) => {
-      if (initialToken) {
-        config.headers.Authorization = `Bearer ${initialToken}`;
+export const setupResponseInterceptor = (onUnauthorized: () => void) => {
+  api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response?.status === 401) {
+        onUnauthorized();
       }
-      return config;
-    });
-
-    client.interceptors.response.use(
-      (response) => response,
-      async (error) => {
-        if (error.response?.status === 401) {
-          handleAxiosError(error);
-        }
-        return Promise.reject(error);
-      }
-    );
-
-    return client;
-  }, [initialToken]); 
-
-  return api;
-}
+      return Promise.reject(error);
+    }
+  );
+};

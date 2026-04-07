@@ -75,8 +75,8 @@ export default function Authentication() {
         } else {
           await Login(formData)
         }
-      } catch (error) {
-        setIsLoading(false) // Only reset if there's an error; if success, the redirect will handle it
+      } finally {
+        setIsLoading(false)
       }
     }
   }
